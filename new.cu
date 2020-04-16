@@ -325,7 +325,7 @@ int main(){
   bool flag = false;
   while(flag == false){
 
-    crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+    crack<<<128, 512>>>(
       input_seed_count,
       input_seeds,
       output_seed_count,
