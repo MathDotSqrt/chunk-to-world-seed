@@ -68,8 +68,8 @@ constexpr size_t OUTPUT_SEED_ARRAY_SIZE = 1 << 20;
 /*DETAILS*/
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t BLOCK_SIZE = 256;
-constexpr int32_t NUM_BLOCKS = 256;
+constexpr int32_t BLOCK_SIZE = 512;
+constexpr int32_t NUM_BLOCKS = 128;
 constexpr int32_t NUM_WORKERS = NUM_BLOCKS * BLOCK_SIZE;
 /*CUDA LAUNCH CONSTANTS*/
 
@@ -361,6 +361,9 @@ int main(){
   bool flag = false;
   while(file_input_count == input_seed_count){
     printf("Compute...\n");
+    printf("INPUT %llu\n", input_seeds_cpu[0]);
+
+    std::cout << input_seed_count << " " << mult_trailing_zeros << " " << first_mult_inv << " " << x_count << " " << z_count << " " << total_count << "\n";
     crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(
       input_seed_count,
       input_seeds_gpu,

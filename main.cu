@@ -192,7 +192,7 @@ __global__ void crack(uint64_t seedInputCount, uint64_t* seedInputArray, uint64_
 }
 
 #ifndef OUTPUT_FILE
-#define OUTPUT_FILE "WorldSeeds.txt"
+#define OUTPUT_FILE "data/BadWorldSeeds.txt"
 #endif
 
 #ifndef INPUT_FILE
@@ -246,7 +246,7 @@ int main() {
     uint64_t* outputSeeds;
     CHECK_GPU_ERR(cudaMallocManaged(&outputSeeds, sizeof(*outputSeeds) * OUTPUT_SEED_ARRAY_SIZE));
 
-    fp_out = fopen("WorldSeeds.txt", "w");
+    fp_out = fopen(OUTPUT_FILE, "w");
     fp = fopen(INPUT_FILE, "r");
     if (!fp) {
         printf("Could not open file\n");
@@ -258,7 +258,7 @@ int main() {
     {
         if(fgets(str, MAXCHAR, fp) != NULL)
         {
-            sscanf(str, "%lu", &inputSeeds[i]);
+            sscanf(str, "%llu", &inputSeeds[i]);
         }
     }
 
@@ -282,7 +282,8 @@ int main() {
     printf("FIRST %llu\n", inputSeeds[0]);
     while (true) {
         //runs crack with WORKER_COUNT number of seeds
-        printf("COMPUTER %llu %llu\n", inputSeedCount, *outputSeedCount);
+        std::cout << inputSeedCount << " " << multTrailingZeroes << " " << firstMultInv << " " << xCount << " " << zCount << " " << totalCount << "\n";
+
         crack<<<(WORKER_COUNT >> 9), (1 << 9)>>>(inputSeedCount, inputSeeds,
                                             outputSeedCount, outputSeeds,
                                             multTrailingZeroes, firstMultInv,
@@ -294,7 +295,7 @@ int main() {
         for(uint64_t i = 0; i < WORKER_COUNT; i++) {
 
             if(fgets(str, MAXCHAR, fp) != NULL) {
-                sscanf(str, "%lu", &buffer[i]);
+                sscanf(str, "%llu", &buffer[i]);
                 count++;
             } else {
                 doneFlag = true;
@@ -333,7 +334,7 @@ int main() {
         printf("Searched: %ld seeds. Found %ld matches. Uptime: %.1fs. Speed: %.2fk seeds/s. Completion: %.3f%%. ETA: %.1f%c.\n", numSearched, totalSeeds, timeElapsed, speed, progress, estimatedTime, suffix);
 
         for (int i = 0; i < *outputSeedCount; i++) {
-            fprintf(fp_out, "%lu\n", outputSeeds[i]);
+            fprintf(fp_out, "%llu\n", outputSeeds[i]);
         }
         fflush(fp_out);
 
