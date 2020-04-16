@@ -57,14 +57,14 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
 #define M4 55986898099985ULL
 #define ADDEND4 49720483695876ULL
 
-inline __host__ __device__ int64_t nextLong(uint64_t* seed) {
+__host__ __device__ int64_t nextLong(uint64_t* seed) {
     *seed = (*seed * M1 + ADDEND1) & MASK48;
     int32_t u = *seed >> 16;
     *seed = (*seed * M1 + ADDEND1) & MASK48;
     return ((uint64_t)u << 32) + (int32_t)(*seed >> 16);
 }
 
-inline __device__ void addSeed(uint64_t seed, uint64_t* seeds, uint64_t* seedCounter)
+__device__ void addSeed(uint64_t seed, uint64_t* seeds, uint64_t* seedCounter)
 {
     // unsigned long long* cast is required for CUDA 9 :thonkgpu:
     uint64_t id = atomicAdd((unsigned long long*) seedCounter, 1ULL);
@@ -75,7 +75,7 @@ inline __host__ __device__ uint64_t makeMask(int32_t bits) {
     return (1ULL << bits) - 1;
 }
 
-inline __host__ int countTrailingZeroesHost(uint64_t v){
+__host__ int countTrailingZeroesHost(uint64_t v){
     int c = 0;
     v = (v ^ (v - 1)) >> 1;
 
@@ -86,11 +86,11 @@ inline __host__ int countTrailingZeroesHost(uint64_t v){
     return c;
 }
 
-inline  __device__ int countTrailingZeroes(uint64_t v) {
+__device__ int countTrailingZeroes(uint64_t v) {
     return __popcll((v & (-v))-1);
 }
 
-inline __host__ __device__ uint64_t modInverse(uint64_t x) {
+constexpr __host__ __device__ uint64_t modInverse(uint64_t x) {
     uint64_t inv = 0;
     uint64_t b = 1;
     for (int32_t i = 0; i < 16; i++) {
@@ -100,20 +100,20 @@ inline __host__ __device__ uint64_t modInverse(uint64_t x) {
     return inv;
 }
 
-inline __host__ __device__ uint64_t getChunkSeed(uint64_t worldSeed) {
+__host__ __device__ uint64_t getChunkSeed(uint64_t worldSeed) {
     uint64_t seed = (worldSeed ^ M1) & MASK48;
     int64_t a = nextLong(&seed) / 2 * 2 + 1;
     int64_t b = nextLong(&seed) / 2 * 2 + 1;
     return (uint64_t)(((CHUNK_X * a + CHUNK_Z * b) ^ worldSeed) & MASK48);
 }
 
-inline __host__ __device__ uint64_t getPartialAddend(uint64_t partialSeed, int32_t bits) {
+__host__ __device__ uint64_t getPartialAddend(uint64_t partialSeed, int32_t bits) {
     uint64_t mask = makeMask(bits);
     return ((uint64_t)CHUNK_X) * (((int32_t)(((M2 * ((partialSeed ^ M1) & mask) + ADDEND2) & MASK48) >> 16)) / 2 * 2 + 1) +
            ((uint64_t)CHUNK_Z) * (((int32_t)(((M4 * ((partialSeed ^ M1) & mask) + ADDEND4) & MASK48) >> 16)) / 2 * 2 + 1);
 }
 
-inline __device__ void addWorldSeed(uint64_t firstAddend, int32_t multTrailingZeroes, uint64_t firstMultInv,
+__device__ void addWorldSeed(uint64_t firstAddend, int32_t multTrailingZeroes, uint64_t firstMultInv,
                                     uint64_t c, uint64_t chunkSeed, uint64_t* seeds, uint64_t* seedCounter) {
     if(countTrailingZeroes(firstAddend) < multTrailingZeroes)
         return;
@@ -201,132 +201,157 @@ __global__ void crack(uint64_t seedInputCount, uint64_t* seedInputArray, uint64_
 #undef int
 int main() {
     #define int uint32_t
-        setbuf(stdout, NULL);
-        FILE *fp;
-        FILE *fp_out;
-        char str[MAXCHAR];
-        fp = fopen("SEEDS.txt", "r");
-        uint64_t totalInputSeeds = 0;
-        if (!fp) {
-            printf("Could not open file\n");
-            return 1;
-        }
-        printf("Counting input size...\n");
-        while (fgets(str, MAXCHAR, fp))
-            totalInputSeeds++;
-        fclose(fp);
-        fp = fopen("SEEDS.txt", "r");
-        if (!fp) {
-            printf("Could not open file\n");
-            return 1;
-        }
-        fp_out = fopen("WorldSeeds.txt", "w");
-
-        uint64_t* buffer = (uint64_t*)malloc(WORKER_COUNT * sizeof(uint64_t));
-
-        int inputSeedCount = WORKER_COUNT;
+    setbuf(stdout, NULL);
 
 
-        uint64_t* inputSeeds;
-        CHECK_GPU_ERR(cudaMallocManaged(&inputSeeds, sizeof(*inputSeeds) * (inputSeedCount)));
+    //file pointers for input and out
+    FILE *fp;
+    FILE *fp_out;
 
-        uint64_t* outputSeedCount;
-        CHECK_GPU_ERR(cudaMallocManaged(&outputSeedCount, sizeof(*outputSeedCount)));
+    //buffer for reading each line of the file
+    char str[MAXCHAR];
 
-        uint64_t* outputSeeds;
-        CHECK_GPU_ERR(cudaMallocManaged(&outputSeeds, sizeof(*outputSeeds) * OUTPUT_SEED_ARRAY_SIZE));
+    //calculating number of lines in input file
+    fp = fopen("SEEDS.txt", "r");
+    uint64_t totalInputSeeds = 0;
+    if (!fp) {
+        printf("Could not open file\n");
+        return 1;
+    }
+    printf("Counting input size...\n");
+    while (fgets(str, MAXCHAR, fp))
+        totalInputSeeds++;
+    fclose(fp);   //no need to close and reopen lmao
 
-        //Inital copy
-        for(uint64_t i = 0; i < WORKER_COUNT; i++)
+
+
+
+
+    //buffer for what
+    uint64_t* buffer = (uint64_t*)malloc(WORKER_COUNT * sizeof(uint64_t));
+
+    //number of input seeds
+    int inputSeedCount = WORKER_COUNT;
+
+    //array of input seeds
+    uint64_t* inputSeeds;
+    //doesnt need to be malloc managed
+    CHECK_GPU_ERR(cudaMallocManaged(&inputSeeds, sizeof(*inputSeeds) * (inputSeedCount)));
+
+    //number of outputseeds
+    uint64_t* outputSeedCount;
+    CHECK_GPU_ERR(cudaMallocManaged(&outputSeedCount, sizeof(*outputSeedCount)));
+    //array of outputseeds
+    uint64_t* outputSeeds;
+    CHECK_GPU_ERR(cudaMallocManaged(&outputSeeds, sizeof(*outputSeeds) * OUTPUT_SEED_ARRAY_SIZE));
+
+    fp_out = fopen("WorldSeeds.txt", "w");
+    fp = fopen("SEEDS.txt", "r");
+    if (!fp) {
+        printf("Could not open file\n");
+        return 1;
+    }
+    //writes input seeds file into shared memory
+    //only writes WORKER_COUNT ammount of seeds
+    for(uint64_t i = 0; i < WORKER_COUNT; i++)
+    {
+        if(fgets(str, MAXCHAR, fp) != NULL)
         {
-            if(fgets(str, MAXCHAR, fp) != NULL)
-            {
-                sscanf(str, "%lu", &inputSeeds[i]);
+            sscanf(str, "%lu", &inputSeeds[i]);
+        }
+    }
+
+    printf("Beginning converting %lu seeds\n", totalInputSeeds);
+    int count = 0; // Counter used for end bit
+    int64_t numSearched = 0;
+    int64_t totalSeeds = 0;
+    clock_t lastIteration = clock();
+    clock_t startTime = clock();
+
+    uint64_t firstMultiplier = (M2 * CHUNK_X + M4 * CHUNK_Z) & MASK16;
+    int32_t multTrailingZeroes = countTrailingZeroesHost(firstMultiplier);
+    uint64_t firstMultInv = modInverse(firstMultiplier >> multTrailingZeroes);
+
+    int32_t xCount = countTrailingZeroesHost(CHUNK_X);
+    int32_t zCount = countTrailingZeroesHost(CHUNK_Z);
+    int32_t totalCount = countTrailingZeroesHost(CHUNK_X | CHUNK_Z);
+
+    while (true) {
+
+        //runs crack with WORKER_COUNT number of seeds
+        crack<<<(WORKER_COUNT >> 9), (1 << 9)>>>(inputSeedCount, inputSeeds,
+                                            outputSeedCount, outputSeeds,
+                                            multTrailingZeroes, firstMultInv,
+                                            xCount, zCount, totalCount);
+
+        //reads more seeds while running
+        bool doneFlag = false;
+        count = 0;
+        for(uint64_t i = 0; i < WORKER_COUNT; i++) {
+
+            if(fgets(str, MAXCHAR, fp) != NULL) {
+                sscanf(str, "%lu", &buffer[i]);
+                count++;
+            } else {
+                doneFlag = true;
             }
         }
-
-        printf("Beginning converting %lu seeds\n", totalInputSeeds);
-        int count = 0; // Counter used for end bit
-        int64_t numSearched = 0;
-        int64_t totalSeeds = 0;
-        clock_t lastIteration = clock();
-        clock_t startTime = clock();
-
-        uint64_t firstMultiplier = (M2 * CHUNK_X + M4 * CHUNK_Z) & MASK16;
-        int32_t multTrailingZeroes = countTrailingZeroesHost(firstMultiplier);
-        uint64_t firstMultInv = modInverse(firstMultiplier >> multTrailingZeroes);
-
-        int32_t xCount = countTrailingZeroesHost(CHUNK_X);
-        int32_t zCount = countTrailingZeroesHost(CHUNK_Z);
-        int32_t totalCount = countTrailingZeroesHost(CHUNK_X | CHUNK_Z);
-
-        while (true) {
-            crack<<<WORKER_COUNT >> 9, 1 << 9>>>(inputSeedCount, inputSeeds,
-                                                outputSeedCount, outputSeeds,
-                                                multTrailingZeroes, firstMultInv,
-                                                xCount, zCount, totalCount);
-
-            bool doneFlag = false;
-            count = 0;
-            for(uint64_t i = 0; i < WORKER_COUNT; i++) {
-
-                if(fgets(str, MAXCHAR, fp) != NULL) {
-                    sscanf(str, "%lu", &buffer[i]);
-                    count++;
-                } else {
-                    doneFlag = true;
-                }
-            }
-            CHECK_GPU_ERR(cudaPeekAtLastError());
-            CHECK_GPU_ERR(cudaDeviceSynchronize());
-            for(uint64_t i = 0; i < WORKER_COUNT; i++) {
-                inputSeeds[i] = buffer[i];
-            }
-
-            double iterationTime = (double)(clock() - lastIteration) / CLOCKS_PER_SEC;
-            double timeElapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
-            lastIteration = clock();
-            numSearched += WORKER_COUNT;
-            double speed = WORKER_COUNT / iterationTime / 1000.0;
-            double progress = (double) numSearched / (double) totalInputSeeds * 100.0;
-            double estimatedTime = (double) (totalInputSeeds - numSearched) / (double) WORKER_COUNT * iterationTime;
-            char suffix = 's';
-            if (estimatedTime >= 3600) {
-                suffix = 'h';
-                estimatedTime /= 3600;
-            } else if (estimatedTime >= 60) {
-                suffix = 'm';
-                estimatedTime /= 60;
-            }
-            if (progress >= 100) {
-                estimatedTime = 0;
-                suffix = 's';
-            }
-            totalSeeds += *outputSeedCount;
-
-            printf("Searched: %ld seeds. Found %ld matches. Uptime: %.1fs. Speed: %.2fk seeds/s. Completion: %.3f%%. ETA: %.1f%c.\n", numSearched, totalSeeds, timeElapsed, speed, progress, estimatedTime, suffix);
-
-            for (int i = 0; i < *outputSeedCount; i++) {
-                fprintf(fp_out, "%lu\n", outputSeeds[i]);
-            }
-            fflush(fp_out);
-
-            *outputSeedCount = 0;
-            if (doneFlag) {
-                printf("DONE\n");
-                break;
-            }
-        }
-
-        crack<<<WORKER_COUNT >> 9, 1 << 9>>>(count, inputSeeds, outputSeedCount,
-                                            outputSeeds, multTrailingZeroes,
-                                            firstMultInv, xCount, zCount,
-                                            totalCount);
+        CHECK_GPU_ERR(cudaPeekAtLastError());
+        //waits for gpu to finish before uploading new work
         CHECK_GPU_ERR(cudaDeviceSynchronize());
+        for(uint64_t i = 0; i < WORKER_COUNT; i++) {
+            inputSeeds[i] = buffer[i];
+        }
+
+        double iterationTime = (double)(clock() - lastIteration) / CLOCKS_PER_SEC;
+        double timeElapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
+        lastIteration = clock();
+        numSearched += WORKER_COUNT;
+        double speed = WORKER_COUNT / iterationTime / 1000.0;
+        double progress = (double) numSearched / (double) totalInputSeeds * 100.0;
+        double estimatedTime = (double) (totalInputSeeds - numSearched) / (double) WORKER_COUNT * iterationTime;
+        char suffix = 's';
+        if (estimatedTime >= 3600) {
+            suffix = 'h';
+            estimatedTime /= 3600;
+        } else if (estimatedTime >= 60) {
+            suffix = 'm';
+            estimatedTime /= 60;
+        }
+        if (progress >= 100) {
+            estimatedTime = 0;
+            suffix = 's';
+        }
+        totalSeeds += *outputSeedCount;
+
+        printf("Searched: %ld seeds. Found %ld matches. Uptime: %.1fs. Speed: %.2fk seeds/s. Completion: %.3f%%. ETA: %.1f%c.\n", numSearched, totalSeeds, timeElapsed, speed, progress, estimatedTime, suffix);
+
         for (int i = 0; i < *outputSeedCount; i++) {
             fprintf(fp_out, "%lu\n", outputSeeds[i]);
         }
         fflush(fp_out);
-        fclose(fp);
-        fclose(fp_out);
+
+        *outputSeedCount = 0;
+        if (doneFlag) {
+            printf("DONE\n");
+            break;
+        }
     }
+
+
+    //whyyy
+    crack<<<(WORKER_COUNT >> 9), (1 << 9)>>>(count, inputSeeds, outputSeedCount,
+                                        outputSeeds, multTrailingZeroes,
+                                        firstMultInv, xCount, zCount,
+                                        totalCount);
+    CHECK_GPU_ERR(cudaDeviceSynchronize());
+
+
+    //write outputseeds to file
+    for (int i = 0; i < *outputSeedCount; i++) {
+        fprintf(fp_out, "%lu\n", outputSeeds[i]);
+    }
+    fflush(fp_out);
+    fclose(fp);
+    fclose(fp_out);
+}
