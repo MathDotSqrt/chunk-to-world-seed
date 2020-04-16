@@ -101,7 +101,7 @@ constexpr uint64_t mod_inv(uint64_t x) {
 __device__
 int32_t ctz(uint64_t v){
   //return __popcll((v & (-v))-1);
-  return __popcll(v & (v-1)) - 1;
+  return __popcll(v ^ (v-1)) - 1;
 }
 
 __device__
@@ -137,6 +137,7 @@ __device__
 void add_seed(uint64_t seed, uint64_t* seeds, uint64_t* seedCounter)
 {
   // unsigned long long* cast is required for CUDA 9 :thonkgpu:
+  //atomic contention
   uint64_t id = atomicAdd((unsigned long long*) seedCounter, 1ULL);
   seeds[id] = seed;
 }
@@ -151,6 +152,7 @@ void add_world_seed(
   uint64_t* seeds,
   uint64_t* seedCounter) {
 
+  //conditional
   if(ctz(firstAddend) < multTrailingZeroes)
     return;
 
@@ -158,6 +160,7 @@ void add_world_seed(
   uint64_t b = (((firstMultInv * firstAddend) >> multTrailingZeroes) ^ (M1 >> 16))
   & make_mask(16 - multTrailingZeroes);
 
+  //conditional
   if (multTrailingZeroes != 0) {
     uint64_t smallMask = make_mask(multTrailingZeroes);
     uint64_t smallMultInverse = smallMask & firstMultInv;
@@ -180,6 +183,7 @@ void add_world_seed(
   uint64_t topBits = ((((firstMultInv * (target2 - secondAddend)) >> multTrailingZeroes) ^ (M1 >> 32))
     & make_mask(16 - multTrailingZeroes));
 
+  //conditional with the +=
   for (; topBits < (1ULL << 16); topBits += (1ULL << (16 - multTrailingZeroes))) {
       if (get_chunk_seed((topBits << 32) + bottom32BitsSeed) == chunkSeed) {
           add_seed((topBits << 32) + bottom32BitsSeed, seeds, seedCounter);
@@ -187,6 +191,7 @@ void add_world_seed(
   }
 }
 
+//This could move to cpu to remove all the conditionals
 __global__
 void crack(
   uint64_t seedInputCount,
@@ -283,7 +288,7 @@ bool file_to_buffer(FILE *source, uint64_t *dest, size_t N){
   static char line[MAX_LINE];
   for(size_t i = 0; i < N; i++){
     if(fgets(line, MAX_LINE, source) != nullptr){
-      sscanf(line, "%lu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
+      sscanf(line, "%llu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
     }
     else{
       return false;
@@ -294,7 +299,7 @@ bool file_to_buffer(FILE *source, uint64_t *dest, size_t N){
 
 void buffer_to_file(uint64_t *source, FILE *dest, size_t N){
   for(size_t i = 0; i < N; i++){
-    fprintf(dest, "%lu\n", source[i]);  //THIS IS SUPPOSED TO BE LLU
+    fprintf(dest, "%llu\n", source[i]);  //THIS IS SUPPOSED TO BE LLU
   }
 }
 
