@@ -74,7 +74,7 @@ inline __device__ void addSeed(uint64_t seed, uint64_t* seeds, uint64_t* seedCou
 inline __host__ __device__ uint64_t makeMask(int32_t bits) {
     return (1ULL << bits) - 1;
 }
-
+// can use __builtin_ctz() on cpu and __device__​ int __clzll ( long long int x ) on gpu
 inline __host__ __device__ int countTrailingZeroes(uint64_t v) {
     int c;
 
@@ -202,7 +202,7 @@ int main() {
         FILE *fp;
         FILE *fp_out;
         char str[MAXCHAR];
-        fp = fopen("SEEDS.txt", "r");
+        fp = fopen("data/chunk_seeds.txt", "r");
         uint64_t totalInputSeeds = 0;
         if (!fp) {
             printf("Could not open file\n");
@@ -212,12 +212,12 @@ int main() {
         while (fgets(str, MAXCHAR, fp))
             totalInputSeeds++;
         fclose(fp);
-        fp = fopen("SEEDS.txt", "r");
+        fp = fopen("data/chunk_seeds.txt", "r");
         if (!fp) {
             printf("Could not open file\n");
             return 1;
         }
-        fp_out = fopen("WorldSeeds.txt", "w");
+        fp_out = fopen("data/MainWorldSeeds.txt", "w");
 
         uint64_t* buffer = (uint64_t*)malloc(WORKER_COUNT * sizeof(uint64_t));
 
@@ -268,7 +268,7 @@ int main() {
             for(uint64_t i = 0; i < WORKER_COUNT; i++) {
 
                 if(fgets(str, MAXCHAR, fp) != NULL) {
-                    sscanf(str, "%lu", &buffer[i]);
+                    sscanf(str, "%llu", &buffer[i]);
                     count++;
                 } else {
                     doneFlag = true;
@@ -304,7 +304,7 @@ int main() {
             printf("Searched: %ld seeds. Found %ld matches. Uptime: %.1fs. Speed: %.2fk seeds/s. Completion: %.3f%%. ETA: %.1f%c.\n", numSearched, totalSeeds, timeElapsed, speed, progress, estimatedTime, suffix);
 
             for (int i = 0; i < *outputSeedCount; i++) {
-                fprintf(fp_out, "%lu\n", outputSeeds[i]);
+                fprintf(fp_out, "%llu\n", outputSeeds[i]);
             }
             fflush(fp_out);
 
