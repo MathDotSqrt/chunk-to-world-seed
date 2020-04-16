@@ -238,10 +238,9 @@ int main() {
         {
             if(fgets(str, MAXCHAR, fp) != NULL)
             {
-                sscanf(str, "%lu", &inputSeeds[i]);
+                sscanf(str, "%llu", &inputSeeds[i]);
             }
         }
-
         printf("Beginning converting %lu seeds\n", totalInputSeeds);
         int count = 0; // Counter used for end bit
         int64_t numSearched = 0;
@@ -258,6 +257,7 @@ int main() {
         int32_t totalCount = countTrailingZeroes(CHUNK_X | CHUNK_Z);
 
         while (true) {
+          printf("%llu\n", inputSeeds[0]);
             crack<<<WORKER_COUNT >> 9, 1 << 9>>>(inputSeedCount, inputSeeds,
                                                 outputSeedCount, outputSeeds,
                                                 multTrailingZeroes, firstMultInv,
@@ -314,6 +314,7 @@ int main() {
                 break;
             }
         }
+        printf("%llu\n", inputSeeds[0]);
 
         crack<<<WORKER_COUNT >> 9, 1 << 9>>>(count, inputSeeds, outputSeedCount,
                                             outputSeeds, multTrailingZeroes,
@@ -321,7 +322,7 @@ int main() {
                                             totalCount);
         CHECK_GPU_ERR(cudaDeviceSynchronize());
         for (int i = 0; i < *outputSeedCount; i++) {
-            fprintf(fp_out, "%lu\n", outputSeeds[i]);
+            fprintf(fp_out, "%llu\n", outputSeeds[i]);
         }
         fflush(fp_out);
         fclose(fp);
