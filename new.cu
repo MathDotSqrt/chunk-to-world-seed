@@ -101,7 +101,16 @@ constexpr uint64_t mod_inv(uint64_t x) {
 
 __device__
 int32_t ctz(uint64_t v){
-  return __popcll((v & (-v))-1);
+  int c = 0;
+  v = (v ^ (v - 1)) >> 1;
+
+  for(c = 0; v != 0; c++){
+      v >>= 1;
+  }
+
+  return c;
+
+  //return __popcll((v & (-v))-1);
   //return __popcll(v ^ (v-1)) - 1;
 }
 
@@ -289,7 +298,7 @@ size_t file_to_buffer(FILE *source, uint64_t *dest, size_t N){
   static char line[MAX_LINE];
   for(size_t i = 0; i < N; i++){
     if(fgets(line, MAX_LINE, source) != nullptr){
-      sscanf(line, "%lu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
+      sscanf(line, "%llu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
     }
     else{
       return i;
@@ -300,7 +309,7 @@ size_t file_to_buffer(FILE *source, uint64_t *dest, size_t N){
 
 void buffer_to_file(uint64_t *source, FILE *dest, size_t N){
   for(size_t i = 0; i < N; i++){
-    fprintf(dest, "%lu\n", source[i]);  //THIS IS SUPPOSED TO BE LLU
+    fprintf(dest, "%llu\n", source[i]);  //THIS IS SUPPOSED TO BE LLU
   }
 
   fflush(dest);
