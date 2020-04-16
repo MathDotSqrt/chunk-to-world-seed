@@ -28,13 +28,7 @@
 #include <chrono>
 #include <thread>
 
-#define CHECK_GPU_ERR(code) gpuAssert((code), __FILE__, __LINE__)
-inline void gpuAssert(cudaError_t code, const char* file, int line) {
-    if (code != cudaSuccess) {
-        fprintf(stderr, "GPUassert: %s (code %d) %s %d\n", cudaGetErrorString(code), code, file, line);
-        exit(code);
-    }
-}
+
 
 #ifndef CHUNK_X
 #define CHUNK_X 3
