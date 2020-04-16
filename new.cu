@@ -132,8 +132,11 @@ __host__ __device__ uint64_t get_chunk_seed(uint64_t worldSeed) {
 
 __host__ __device__ uint64_t get_partial_addend(uint64_t partialSeed, int32_t bits) {
   uint64_t mask = make_mask(bits);
+/* clang-format off */
   return ((uint64_t)CHUNK_X) * (((int32_t)(((M2 * ((partialSeed ^ M1) & mask) + ADDEND2) & MASK48) >> 16)) / 2 * 2 + 1) +
          ((uint64_t)CHUNK_Z) * (((int32_t)(((M4 * ((partialSeed ^ M1) & mask) + ADDEND4) & MASK48) >> 16)) / 2 * 2 + 1);
+/* clang-format on */
+
 }
 
 __device__ void add_world_seed(uint64_t firstAddend, int32_t multTrailingZeroes, uint64_t firstMultInv,
