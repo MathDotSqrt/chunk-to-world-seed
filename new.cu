@@ -20,6 +20,7 @@
 #endif
 
 //reduce array of zeros
+#include <thrust/device_ptr.h>
 #include <thrust/scan.h>
 #include <memory>
 #include <array>
@@ -314,17 +315,21 @@ int main(){
   printf("Total seeds: %d\n", total_input_seeds);
 
   const int32_t input_seed_count = NUM_WORKERS;
-  uint64_t *input_cpu_buffer = (uint64_t*)malloc(sizeof(uint64_t) * input_seed_count);
+  //uint64_t *input_cpu_buffer = (uint64_t*)malloc(sizeof(uint64_t) * input_seed_count);
 
   printf("Allocating gpu mem\n");
-  uint64_t *input_seeds = nullptr;
-  uint64_t *output_seeds = nullptr;
+  uint64_t *input_seeds_cpu = (uint64_t*)malloc(sizeof(uint64_t) * input_seed_count);
+  uint64_t *output_seeds_cpu = (uint64_t*)malloc(sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE);
+
+  uint64_t *input_seeds_gpu = nullptr;
+  uint64_t *output_seeds_gpu = nullptr;
   uint64_t *output_seed_count = nullptr;
 
-  CHECK_GPU_ERR(cudaMallocManaged(&input_seeds, sizeof(uint64_t) * input_seed_count));
-  CHECK_GPU_ERR(cudaMallocManaged(&output_seeds, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
+  CHECK_GPU_ERR(cudaMalloc(&input_seeds_gpu, sizeof(uint64_t) * input_seed_count));
+  CHECK_GPU_ERR(cudaMalloc(&output_seeds_gpu, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
   CHECK_GPU_ERR(cudaMallocManaged(&output_seed_count, sizeof(uint64_t)));
 
+  *output_seed_count = 0;
 
   constexpr auto first_multiplier = (M2 * (uint64_t)CHUNK_X + M4 * (uint64_t)CHUNK_Z) & MASK16;
   constexpr auto mult_trailing_zeros = count_trailing_zeros(first_multiplier);
@@ -337,35 +342,44 @@ int main(){
 
   //520 0 0 0
   printf("Reading input...\n");
-  file_to_buffer(in, input_seeds, input_seed_count);
+  file_to_buffer(in, input_seeds_cpu, input_seed_count);
   printf("Compute...\n");
 
+  uint64_t output_count = 0LLU;
+  CHECK_GPU_ERR(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, input_seed_count, cudaMemcpyHostToDevice));
   bool flag = false;
-  while(flag == false){
+  while(true){
     crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(
       input_seed_count,
-      input_seeds,
+      input_seeds_gpu,
       output_seed_count,
-      output_seeds,
+      output_seeds_gpu,
       mult_trailing_zeros,
       first_mult_inv,
       x_count,
       z_count,
       total_count
     );
-    flag = !file_to_buffer(in, input_cpu_buffer, input_seed_count);
+
+    buffer_to_file(output_seeds_cpu, out, output_count);
+    if(flag == true){
+      break;
+    }
+    flag = !file_to_buffer(in, input_seeds_cpu, input_seed_count);
 
     CHECK_GPU_ERR(cudaPeekAtLastError());
     CHECK_GPU_ERR(cudaDeviceSynchronize());
-
-    for(uint64_t i = 0; i < input_seed_count; i++) {
-        input_seeds[i] = input_cpu_buffer[i];
-    }
-    buffer_to_file(output_seeds, out, *output_seed_count);
+    output_count = *output_seed_count;
+    CHECK_GPU_ERR(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, input_seed_count, cudaMemcpyHostToDevice));
+    CHECK_GPU_ERR(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count, cudaMemcpyDeviceToHost));
   }
   printf("Done.\n");
-  cudaFree(input_seeds);
-  cudaFree(output_seeds);
+
+  free(input_seeds_cpu);
+  free(output_seeds_cpu);
+
+  cudaFree(input_seeds_gpu);
+  cudaFree(output_seeds_gpu);
   cudaFree(output_seed_count);
   fclose(in);
   fflush(out);
