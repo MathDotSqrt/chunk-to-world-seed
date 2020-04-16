@@ -195,7 +195,7 @@ __global__ void crack(uint64_t seedInputCount, uint64_t* seedInputArray, uint64_
 #endif
 
 #ifndef INPUT_FILE
-#define INPUT_FILE "SEEDS.txt"
+#define INPUT_FILE "data/chunk_seeds.txt"
 #endif
 
 #undef int
@@ -212,10 +212,10 @@ int main() {
     char str[MAXCHAR];
 
     //calculating number of lines in input file
-    fp = fopen("SEEDS.txt", "r");
+    fp = fopen(INPUT_FILE, "r");
     uint64_t totalInputSeeds = 0;
     if (!fp) {
-        printf("Could not open file\n");
+        printf("Could not open file \n");
         return 1;
     }
     printf("Counting input size...\n");
@@ -246,7 +246,7 @@ int main() {
     CHECK_GPU_ERR(cudaMallocManaged(&outputSeeds, sizeof(*outputSeeds) * OUTPUT_SEED_ARRAY_SIZE));
 
     fp_out = fopen("WorldSeeds.txt", "w");
-    fp = fopen("SEEDS.txt", "r");
+    fp = fopen(INPUT_FILE, "r");
     if (!fp) {
         printf("Could not open file\n");
         return 1;
