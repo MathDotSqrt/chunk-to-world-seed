@@ -279,16 +279,17 @@ int32_t count_file_length(FILE *file){
   return total;
 }
 
-void file_to_buffer(FILE *source, uint64_t *dest, size_t N){
+bool file_to_buffer(FILE *source, uint64_t *dest, size_t N){
   static char line[MAX_LINE];
   for(size_t i = 0; i < N; i++){
     if(fgets(line, MAX_LINE, source) != nullptr){
       sscanf(line, "%lu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
     }
     else{
-      break;
+      return false;
     }
   }
+  return true;
 }
 
 void buffer_to_file(uint64_t *source, FILE *dest, size_t N){
@@ -298,16 +299,19 @@ void buffer_to_file(uint64_t *source, FILE *dest, size_t N){
 }
 
 int main(){
+  setbuf(stdout, NULL);
+
+  printf("Opening files...\n");
   FILE *in = open_file(INPUT_FILE_PATH, "r");
   FILE *out = open_file(OUTPUT_FILE_PATH, "w");
 
   const int32_t total_input_seeds = count_file_length(in);
-
   printf("Total seeds: %d\n", total_input_seeds);
 
   const int32_t input_seed_count = NUM_WORKERS;
   uint64_t *input_cpu_buffer = (uint64_t*)malloc(sizeof(uint64_t) * input_seed_count);
 
+  printf("Allocating gpu mem\n");
   uint64_t *input_seeds = nullptr;
   uint64_t *output_seeds = nullptr;
   uint64_t *output_seed_count = nullptr;
@@ -327,15 +331,13 @@ int main(){
   constexpr auto total_count = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
   //520 0 0 0
-
+  printf("Reading input...\n");
   file_to_buffer(in, input_seeds, input_seed_count);
+  printf("Compute...\n");
+
   bool flag = false;
   while(flag == false){
-
-    printf("%d %llu %llu %d %llu %d %d %d\n", input_seed_count, *input_seeds, *output_seed_count,
-    mult_trailing_zeros, first_mult_inv, x_count, z_count, total_count);
-
-    crack<<<128, 512>>>(
+    crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(
       input_seed_count,
       input_seeds,
       output_seed_count,
@@ -346,21 +348,17 @@ int main(){
       z_count,
       total_count
     );
-
+    flag = !file_to_buffer(in, input_cpu_buffer, input_seed_count);
 
     CHECK_GPU_ERR(cudaPeekAtLastError());
     CHECK_GPU_ERR(cudaDeviceSynchronize());
-
-    file_to_buffer(in, input_cpu_buffer, input_seed_count);
 
     for(uint64_t i = 0; i < input_seed_count; i++) {
         input_seeds[i] = input_cpu_buffer[i];
     }
     buffer_to_file(output_seeds, out, *output_seed_count);
-
-    flag = true;
   }
-
+  printf("Done.\n");
   cudaFree(input_seeds);
   cudaFree(output_seeds);
   cudaFree(output_seed_count);
