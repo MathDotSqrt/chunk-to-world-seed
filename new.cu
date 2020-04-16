@@ -283,7 +283,7 @@ void file_to_buffer(FILE *source, uint64_t *dest, size_t N){
   static char line[MAX_LINE];
   for(size_t i = 0; i < N; i++){
     if(fgets(line, MAX_LINE, source) != nullptr){
-      sscanf(line, "%llu", &dest[i]);
+      sscanf(line, "%lu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
     }
     else{
       break;
@@ -293,7 +293,7 @@ void file_to_buffer(FILE *source, uint64_t *dest, size_t N){
 
 void buffer_to_file(uint64_t *source, FILE *dest, size_t N){
   for(size_t i = 0; i < N; i++){
-    fprintf(dest, "%llu\n", source[i]);
+    fprintf(dest, "%lu\n", source[i]);  //THIS IS SUPPOSED TO BE LLU
   }
 }
 
@@ -302,6 +302,9 @@ int main(){
   FILE *out = open_file(OUTPUT_FILE_PATH, "w");
 
   const int32_t total_input_seeds = count_file_length(in);
+
+  printf("Total seeds: %d\n", total_input_seeds);
+
   const int32_t input_seed_count = NUM_WORKERS;
   uint64_t *input_cpu_buffer = (uint64_t*)malloc(sizeof(uint64_t) * input_seed_count);
 
@@ -317,15 +320,20 @@ int main(){
   constexpr auto first_multiplier = (M2 * (uint64_t)CHUNK_X + M4 * (uint64_t)CHUNK_Z) & MASK16;
   constexpr auto mult_trailing_zeros = count_trailing_zeros(first_multiplier);
   constexpr auto shift = first_multiplier >> mult_trailing_zeros;
-  constexpr auto first_mult_inv = mod_inv(shift);
+  constexpr uint64_t first_mult_inv = (uint64_t)mod_inv(shift);
 
   constexpr auto x_count = count_trailing_zeros((uint64_t)CHUNK_X);
   constexpr auto z_count = count_trailing_zeros((uint64_t)CHUNK_Z);
   constexpr auto total_count = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
-  file_to_buffer(in, input_seeds, NUM_WORKERS);
+  //520 0 0 0
+
+  file_to_buffer(in, input_seeds, input_seed_count);
   bool flag = false;
   while(flag == false){
+
+    printf("%d %llu %llu %d %llu %d %d %d\n", input_seed_count, *input_seeds, *output_seed_count,
+    mult_trailing_zeros, first_mult_inv, x_count, z_count, total_count);
 
     crack<<<128, 512>>>(
       input_seed_count,
@@ -339,12 +347,15 @@ int main(){
       total_count
     );
 
-    file_to_buffer(in, input_cpu_buffer, input_seed_count);
 
     CHECK_GPU_ERR(cudaPeekAtLastError());
     CHECK_GPU_ERR(cudaDeviceSynchronize());
 
-    memcpy(input_cpu_buffer, input_seeds, input_seed_count);
+    file_to_buffer(in, input_cpu_buffer, input_seed_count);
+
+    for(uint64_t i = 0; i < input_seed_count; i++) {
+        input_seeds[i] = input_cpu_buffer[i];
+    }
     buffer_to_file(output_seeds, out, *output_seed_count);
 
     flag = true;

@@ -276,9 +276,10 @@ int main() {
     int32_t xCount = countTrailingZeroesHost(CHUNK_X);
     int32_t zCount = countTrailingZeroesHost(CHUNK_Z);
     int32_t totalCount = countTrailingZeroesHost(CHUNK_X | CHUNK_Z);
-
+    printf("FIRST %llu\n", inputSeeds[0]);
     while (true) {
-
+      printf("%d %llu %llu %d %llu %d %d %d\n", inputSeedCount, *inputSeeds, *outputSeedCount,
+      multTrailingZeroes, firstMultInv, xCount, zCount, totalCount);
         //runs crack with WORKER_COUNT number of seeds
         crack<<<(WORKER_COUNT >> 9), (1 << 9)>>>(inputSeedCount, inputSeeds,
                                             outputSeedCount, outputSeeds,
