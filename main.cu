@@ -75,16 +75,19 @@ inline __host__ __device__ uint64_t makeMask(int32_t bits) {
     return (1ULL << bits) - 1;
 }
 
-inline __host__ __device__ int countTrailingZeroes(uint64_t v) {
-    int c;
-
+inline __host__ int countTrailingZeroesHost(uint64_t v){
+    int c = 0;
     v = (v ^ (v - 1)) >> 1;
 
-    for(c = 0; v != 0; c++)  {
+    for(c = 0; v != 0; c++){
         v >>= 1;
     }
 
     return c;
+}
+
+inline  __device__ int countTrailingZeroes(uint64_t v) {
+    return __popcll((v & (-v))-1);
 }
 
 inline __host__ __device__ uint64_t modInverse(uint64_t x) {
@@ -250,12 +253,12 @@ int main() {
         clock_t startTime = clock();
 
         uint64_t firstMultiplier = (M2 * CHUNK_X + M4 * CHUNK_Z) & MASK16;
-        int32_t multTrailingZeroes = countTrailingZeroes(firstMultiplier);
+        int32_t multTrailingZeroes = countTrailingZeroesHost(firstMultiplier);
         uint64_t firstMultInv = modInverse(firstMultiplier >> multTrailingZeroes);
 
-        int32_t xCount = countTrailingZeroes(CHUNK_X);
-        int32_t zCount = countTrailingZeroes(CHUNK_Z);
-        int32_t totalCount = countTrailingZeroes(CHUNK_X | CHUNK_Z);
+        int32_t xCount = countTrailingZeroesHost(CHUNK_X);
+        int32_t zCount = countTrailingZeroesHost(CHUNK_Z);
+        int32_t totalCount = countTrailingZeroesHost(CHUNK_X | CHUNK_Z);
 
         while (true) {
             crack<<<WORKER_COUNT >> 9, 1 << 9>>>(inputSeedCount, inputSeeds,
