@@ -370,6 +370,7 @@ int main(){
     CHECK_GPU_ERR(cudaPeekAtLastError());
     CHECK_GPU_ERR(cudaDeviceSynchronize());
     output_count = *output_seed_count;
+    printf("OUTPUT_COUNT %llu\n", output_count);
     CHECK_GPU_ERR(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, input_seed_count, cudaMemcpyHostToDevice));
     CHECK_GPU_ERR(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count, cudaMemcpyDeviceToHost));
   }
