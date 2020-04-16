@@ -293,6 +293,7 @@ int main(){
   FILE *out = open_file(OUTPUT_FILE_PATH, "w");
 
   const int32_t total_input_seeds = count_file_length(in);
+  const int32_t input_seed_count = NUM_WORKERS;
   auto input_cpu_buffer = std::make_unique<std::array<uint64_t, NUM_WORKERS>>();
 
   uint64_t *input_seeds = nullptr;
@@ -312,10 +313,21 @@ int main(){
 
   constexpr auto x_count = count_trailing_zeros(CHUNK_X);
   constexpr auto z_count = count_trailing_zeros(CHUNK_Z);
+  constexpr auto total_count = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
   bool flag = false;
   while(flag == false){
-
+    crack<<<NUM_BLOCKS, NUM_WORKERS>>>>(
+      input_seed_count,
+      input_seeds,
+      output_seed_count,
+      output_seeds,
+      mult_trailing_zeros,
+      first_mult_inv,
+      x_count,
+      z_count,
+      total_count;
+    );
   }
 
   fclose(in);
