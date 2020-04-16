@@ -50,6 +50,7 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
 constexpr uint64_t MASK48 = ((1ULL << 48) - 1ULL);
 constexpr uint64_t MASK32 = ((1ULL << 32) - 1ULL);
 constexpr uint64_t MASK16 = ((1ULL << 16) - 1ULL);
+
 constexpr uint64_t M1 = 25214903917ULL;
 constexpr uint64_t ADDEND1 = 11ULL;
 
@@ -99,11 +100,12 @@ constexpr uint64_t mod_inv(uint64_t x) {
 
 __device__
 int32_t ctz(uint64_t v){
+  //return __popcll((v & (-v))-1);
   return __popcll(v & (v-1)) - 1;
 }
 
 __device__
-int64_t next_long(uint64_t* seed) {
+uint64_t next_long(uint64_t* seed) {
   *seed = (*seed * M1 + ADDEND1) & MASK48;
   int32_t u = *seed >> 16;
   *seed = (*seed * M1 + ADDEND1) & MASK48;
