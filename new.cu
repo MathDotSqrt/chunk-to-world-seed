@@ -51,13 +51,13 @@ constexpr uint64_t MASK48 = ((1ULL << 48) - 1ULL);
 constexpr uint64_t MASK32 = ((1ULL << 32) - 1ULL);
 constexpr uint64_t MASK16 = ((1ULL << 16) - 1ULL);
 constexpr uint64_t M1 = 25214903917ULL;
-constexpr uint64_t APPEND1 = 11ULL;
+constexpr uint64_t ADDEND1 = 11ULL;
 
 constexpr uint64_t M2 = 205749139540585ULL;
 constexpr uint64_t ADDEND2 = 277363943098ULL;
 
 constexpr uint64_t M4 = 55986898099985ULL;
-constexpr uint64_t APPEND4 = 49720483695876ULL;
+constexpr uint64_t ADDEND4 = 49720483695876ULL;
 /*MAGIC NUMBERS*/
 
 /*DETAILS*/
@@ -83,22 +83,22 @@ constexpr const char * OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
 
 __host__ __device__
 uint64_t make_mask(int32_t bits) {
-    return (1ULL << bits) - 1;
+  return (1ULL << bits) - 1;
 }
 
 __host__ __device__
 constexpr uint64_t mod_inv(uint64_t x) {
-    uint64_t inv = 0;
-    uint64_t b = 1;
-    for (int32_t i = 0; i < 16; i++) {
-        inv |= (1ULL << i) * (b & 1);
-        b = (b - x * (b & 1)) >> 1;
-    }
-    return inv;
+  uint64_t inv = 0;
+  uint64_t b = 1;
+  for (int32_t i = 0; i < 16; i++) {
+    inv |= (1ULL << i) * (b & 1);
+    b = (b - x * (b & 1)) >> 1;
+  }
+  return inv;
 }
 
 __device__
-int32_t ctz(uint64 v){
+int32_t ctz(uint64_t v){
   return __popcll(v & (v-1)) - 1;
 }
 
@@ -110,7 +110,8 @@ int64_t next_long(uint64_t* seed) {
   return ((uint64_t)u << 32) + (int32_t)(*seed >> 16);
 }
 
-uint64_t get_chunk_seed(uint64_t world_seed){
+__device__
+uint64_t get_chunk_seed(uint64_t worldSeed){
   uint64_t seed = (worldSeed ^ M1) & MASK48;
   int64_t a = next_long(&seed) / 2 * 2 + 1;
   int64_t b = next_long(&seed) / 2 * 2 + 1;
@@ -118,7 +119,7 @@ uint64_t get_chunk_seed(uint64_t world_seed){
 }
 
 __device__
-uint64_t get_partial_append(uint64_t partial_seed, int32_t bits){
+uint64_t get_partial_addend(uint64_t partialSeed, int32_t bits){
   uint64_t mask = make_mask(bits);
 
   uint64_t magic_x
@@ -156,23 +157,23 @@ void add_world_seed(
   & make_mask(16 - multTrailingZeroes);
 
   if (multTrailingZeroes != 0) {
-      uint64_t smallMask = make_mask(multTrailingZeroes);
-      uint64_t smallMultInverse = smallMask & firstMultInv;
+    uint64_t smallMask = make_mask(multTrailingZeroes);
+    uint64_t smallMultInverse = smallMask & firstMultInv;
 
-      uint64_t partial_append
-        = get_partial_append((b << 16) + c, 32 - multTrailingZeroes);
+    uint64_t partial_append
+      = get_partial_addend((b << 16) + c, 32 - multTrailingZeroes);
 
-      uint64_t target
-        = (((b ^ (bottom32BitsChunkseed >> 16)) & smallMask)
-        - (partial_append >> 16)) & smallMask;
+    uint64_t target
+      = (((b ^ (bottom32BitsChunkseed >> 16)) & smallMask)
+      - (partial_append >> 16)) & smallMask;
 
-      b += (((target * smallMultInverse) ^ (M1 >> (32 - multTrailingZeroes))) & smallMask)
-        << (16 - multTrailingZeroes);
+    b += (((target * smallMultInverse) ^ (M1 >> (32 - multTrailingZeroes))) & smallMask)
+      << (16 - multTrailingZeroes);
   }
 
   uint64_t bottom32BitsSeed = (b << 16) + c;
   uint64_t target2 = (bottom32BitsSeed ^ bottom32BitsChunkseed) >> 16;
-  uint64_t secondAddend = (get_partial_append(bottom32BitsSeed, 32) >> 16);
+  uint64_t secondAddend = (get_partial_addend(bottom32BitsSeed, 32) >> 16);
   secondAddend &= MASK16;
   uint64_t topBits = ((((firstMultInv * (target2 - secondAddend)) >> multTrailingZeroes) ^ (M1 >> 32))
     & make_mask(16 - multTrailingZeroes));
@@ -306,18 +307,18 @@ int main(){
 
   file_to_buffer(in, input_seeds, NUM_WORKERS);
 
-  constexpr auto first_multiplier = ((uint64_t)(M2 * CHUNK_X + M4 * CHUNK_Z) & MASK16);
+  constexpr auto first_multiplier = (M2 * (uint64_t)CHUNK_X + M4 * (uint64_t)CHUNK_Z) & MASK16;
   constexpr auto mult_trailing_zeros = count_trailing_zeros(first_multiplier);
   constexpr auto shift = first_multiplier >> mult_trailing_zeros;
   constexpr auto first_mult_inv = mod_inv(shift);
 
-  constexpr auto x_count = count_trailing_zeros(CHUNK_X);
-  constexpr auto z_count = count_trailing_zeros(CHUNK_Z);
+  constexpr auto x_count = count_trailing_zeros((uint64_t)CHUNK_X);
+  constexpr auto z_count = count_trailing_zeros((uint64_t)CHUNK_Z);
   constexpr auto total_count = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
   bool flag = false;
   while(flag == false){
-    crack<<<NUM_BLOCKS, NUM_WORKERS>>>>(
+    crack<<<NUM_BLOCKS, NUM_WORKERS>>>(
       input_seed_count,
       input_seeds,
       output_seed_count,
@@ -326,8 +327,10 @@ int main(){
       first_mult_inv,
       x_count,
       z_count,
-      total_count;
+      total_count
     );
+
+    flag = true;
   }
 
   fclose(in);
