@@ -25,6 +25,7 @@
 #include <array>
 #include <memory>
 #include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
 #include <thrust/scan.h>
 
 #include <assert.h>
@@ -40,7 +41,7 @@
 #include <chrono>
 #include <thread>
 
-#define CHECK_GPU_ERR(code) gpuAssert((code), __FILE__, __LINE__)
+#define GPU_ASSERT(code) gpuAssert((code), __FILE__, __LINE__)
 inline void gpuAssert(cudaError_t code, const char *file, int line) {
   if (code != cudaSuccess) {
     fprintf(stderr, "GPUassert: %s (code %d) %s %d\n", cudaGetErrorString(code), code, file, line);
@@ -87,27 +88,32 @@ constexpr const char *INPUT_FILE_PATH = "data/chunk_seeds.txt";
 constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
 /*FILE PATHS*/
 
-__host__ __device__ int64_t next_long(uint64_t *seed) {
+__host__ __device__
+int64_t next_long(uint64_t *seed) {
   *seed = (*seed * M1 + ADDEND1) & MASK48;
   int32_t u = *seed >> 16;
   *seed = (*seed * M1 + ADDEND1) & MASK48;
   return ((uint64_t)u << 32) + (int32_t)(*seed >> 16);
 }
 
-__device__ void add_seed(uint64_t seed, uint64_t *seeds, uint64_t *seedCounter) {
+__device__
+void add_seed(uint64_t seed, uint64_t *seeds, uint64_t *seedCounter) {
   // unsigned long long* cast is required for CUDA 9 :thonkgpu:
   uint64_t id = atomicAdd((unsigned long long *)seedCounter, 1ULL);
   seeds[id] = seed;
 }
 
-__host__ __device__ uint64_t make_mask(int32_t bits) { return (1ULL << bits) - 1; }
+__host__ __device__
+uint64_t make_mask(int32_t bits) { return (1ULL << bits) - 1; }
 
-__device__ int ctz(uint64_t v) {
+__device__
+int ctz(uint64_t v) {
   // return __popcll((v & (-v))-1);
   return __popcll(v ^ (v - 1)) - 1;
 }
 
-constexpr __host__ __device__ uint64_t mod_inv(uint64_t x) {
+__host__ __device__
+constexpr uint64_t mod_inv(uint64_t x) {
   uint64_t inv = 0;
   uint64_t b = 1;
   for (int32_t i = 0; i < 16; i++) {
@@ -117,14 +123,16 @@ constexpr __host__ __device__ uint64_t mod_inv(uint64_t x) {
   return inv;
 }
 
-__host__ __device__ uint64_t get_chunk_seed(uint64_t worldSeed) {
+__host__ __device__
+uint64_t get_chunk_seed(uint64_t worldSeed) {
   uint64_t seed = (worldSeed ^ M1) & MASK48;
   int64_t a = next_long(&seed) / 2 * 2 + 1;
   int64_t b = next_long(&seed) / 2 * 2 + 1;
   return (uint64_t)(((CHUNK_X * a + CHUNK_Z * b) ^ worldSeed) & MASK48);
 }
 
-__host__ __device__ uint64_t get_partial_addend(uint64_t partialSeed, int32_t bits) {
+__host__ __device__
+uint64_t get_partial_addend(uint64_t partialSeed, int32_t bits) {
   uint64_t mask = make_mask(bits);
   /* clang-format off */
   return ((uint64_t)CHUNK_X) * (((int32_t)(((M2 * ((partialSeed ^ M1) & mask) + ADDEND2) & MASK48) >> 16)) / 2 * 2 + 1) +
@@ -132,8 +140,9 @@ __host__ __device__ uint64_t get_partial_addend(uint64_t partialSeed, int32_t bi
   /* clang-format on */
 }
 
-__device__ void add_world_seed(uint64_t firstAddend, int32_t multTrailingZeroes, uint64_t firstMultInv, uint64_t c,
-                               uint64_t chunkSeed, uint64_t *seeds, uint64_t *seedCounter) {
+__device__
+void add_world_seed(uint64_t firstAddend, int32_t multTrailingZeroes, uint64_t firstMultInv, uint64_t c,
+                    uint64_t chunkSeed, uint64_t *seeds, uint64_t *seedCounter) {
   if (ctz(firstAddend) < multTrailingZeroes)
     return;
   uint64_t bottom32BitsChunkseed = chunkSeed & MASK32;
@@ -161,9 +170,11 @@ __device__ void add_world_seed(uint64_t firstAddend, int32_t multTrailingZeroes,
   }
 }
 
-__global__ void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutputCounter,
-                      uint64_t *seedOutputArray, int32_t multTrailingZeroes, uint64_t firstMultInv, int32_t xCount,
-                      int32_t zCount, int32_t totalCount) {
+__global__
+void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutputCounter,
+           uint64_t *seedOutputArray, int32_t multTrailingZeroes, uint64_t firstMultInv, int32_t xCount,
+           int32_t zCount, int32_t totalCount) {
+
   uint64_t global_id = blockIdx.x * blockDim.x + threadIdx.x;
   if (global_id > seedInputCount)
     return;
@@ -294,9 +305,9 @@ int main() {
   uint64_t *output_seeds_gpu = nullptr;
   uint64_t *output_seed_count = nullptr;
 
-  CHECK_GPU_ERR(cudaMalloc(&input_seeds_gpu, sizeof(uint64_t) * input_seed_count));
-  CHECK_GPU_ERR(cudaMalloc(&output_seeds_gpu, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
-  CHECK_GPU_ERR(cudaMallocManaged(&output_seed_count, sizeof(uint64_t)));
+  GPU_ASSERT(cudaMalloc(&input_seeds_gpu, sizeof(uint64_t) * input_seed_count));
+  GPU_ASSERT(cudaMalloc(&output_seeds_gpu, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
+  GPU_ASSERT(cudaMallocManaged(&output_seed_count, sizeof(uint64_t)));
 
   *output_seed_count = 0;
 
@@ -309,40 +320,26 @@ int main() {
   constexpr auto z_count = count_trailing_zeros((uint64_t)CHUNK_Z);
   constexpr auto total_count = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
-  // 520 0 0 0
   printf("Reading input...\n");
   uint64_t file_input_count = file_to_buffer(in, input_seeds_cpu, input_seed_count);
-  printf("init FILE_INPUT_COUNT %llu\n", file_input_count);
 
   uint64_t output_count = 0LLU;
-  CHECK_GPU_ERR(
-      cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
-  bool flag = false;
+  GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
   while (file_input_count == input_seed_count) {
-    printf("Compute...\n");
-    printf("INPUT %llu\n", input_seeds_cpu[0]);
-
-    std::cout << input_seed_count << " " << mult_trailing_zeros << " " << first_mult_inv << " " << x_count << " "
-              << z_count << " " << total_count << "\n";
     crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(input_seed_count, input_seeds_gpu, output_seed_count, output_seeds_gpu,
                                       mult_trailing_zeros, first_mult_inv, x_count, z_count, total_count);
 
     // write output cpu to file concurrently
-    printf("OUTPUT_COUNT %llu\n", output_count);
     buffer_to_file(output_seeds_cpu, out, output_count);
     // read input file to cpu concurrently
     file_input_count = file_to_buffer(in, input_seeds_cpu, input_seed_count);
-    printf("FILE_INPUT_COUNT %llu\n", file_input_count);
 
-    CHECK_GPU_ERR(cudaPeekAtLastError());
-    CHECK_GPU_ERR(cudaDeviceSynchronize());
+    GPU_ASSERT(cudaPeekAtLastError());
+    GPU_ASSERT(cudaDeviceSynchronize());
 
     output_count = *output_seed_count;
-    printf("OUTPUT_SEED_COUNT %llu\n", output_count);
-    CHECK_GPU_ERR(
-        cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
-    CHECK_GPU_ERR(
-        cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    GPU_ASSERT(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count * sizeof(uint64_t), cudaMemcpyDeviceToHost));
     *output_seed_count = 0;
   }
 
@@ -350,18 +347,14 @@ int main() {
   crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(file_input_count, input_seeds_gpu, output_seed_count, output_seeds_gpu,
                                     mult_trailing_zeros, first_mult_inv, x_count, z_count, total_count);
   // write from previous run
-  printf("main read %llu\n", file_input_count);
   buffer_to_file(output_seeds_cpu, out, output_count);
-  CHECK_GPU_ERR(cudaPeekAtLastError());
-  CHECK_GPU_ERR(cudaDeviceSynchronize());
+  GPU_ASSERT(cudaPeekAtLastError());
+  GPU_ASSERT(cudaDeviceSynchronize());
 
   output_count = *output_seed_count;
-  printf("OUTPUT_SEED_COUNT %llu\n", output_count);
-  CHECK_GPU_ERR(
-      cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+  GPU_ASSERT(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count * sizeof(uint64_t), cudaMemcpyDeviceToHost));
   buffer_to_file(output_seeds_cpu, out, output_count);
 
-  printf("Done.\n");
 
   free(input_seeds_cpu);
   free(output_seeds_cpu);
