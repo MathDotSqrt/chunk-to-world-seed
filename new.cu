@@ -174,43 +174,45 @@ __global__ void crack(uint64_t seedInputCount, uint64_t* seedInputArray, uint64_
   int32_t x = CHUNK_X;
   int32_t z = CHUNK_Z;
 
-#if CHUNK_X == 0 && CHUNK_Z == 0
-  add_seed(chunkSeed, seedOutputArray, seedOutputCounter);
-#else
-  uint64_t f = chunkSeed & MASK16;
-  uint64_t c = xCount == zCount ? chunkSeed & ((1ULL << (xCount + 1)) - 1) :
-                                  chunkSeed & ((1ULL << (totalCount + 1)) - 1) ^ (1 << totalCount);
-  for (; c < (1ULL << 16); c += (1ULL << (totalCount + 1))) {
-    uint64_t target = (c ^ f) & MASK16;
-    uint64_t magic = (uint64_t)(x * ((M2 * ((c ^ M1) & MASK16) + ADDEND2) >> 16)) +
-                     (uint64_t)(z * ((M4 * ((c ^ M1) & MASK16) + ADDEND4) >> 16));
-    add_world_seed(target - (magic & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#if CHUNK_X != 0
-    add_world_seed(target - ((magic + x) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
-#if CHUNK_Z != 0 && CHUNK_X != CHUNK_Z
-    add_world_seed(target - ((magic + z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
-#if CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0
-    add_world_seed(target - ((magic + x + z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
-#if CHUNK_X != 0 && CHUNK_X != CHUNK_Z
-    add_world_seed(target - ((magic + 2 * x) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
-#if CHUNK_Z != 0 && CHUNK_X != CHUNK_Z
-    add_world_seed(target - ((magic + 2 * z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
-#if CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0 && CHUNK_X * 2 + CHUNK_Z != 0
-    add_world_seed(target - ((magic + 2 * x + z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
-#if CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X != CHUNK_Z && CHUNK_X + CHUNK_Z != 0 && CHUNK_X + CHUNK_Z * 2 != 0
-    add_world_seed(target - ((magic + x + 2 * z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
-#if CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0
-    add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
-#endif
+  if(CHUNK_X == 0 && CHUNK_Z == 0){
+    add_seed(chunkSeed, seedOutputArray, seedOutputCounter);
   }
-#endif // !(CHUNK_X == 0 && CHUNK_Z == 0)
+  else{
+    uint64_t f = chunkSeed & MASK16;
+    uint64_t c = xCount == zCount ? chunkSeed & ((1ULL << (xCount + 1)) - 1) :
+                                    chunkSeed & ((1ULL << (totalCount + 1)) - 1) ^ (1 << totalCount);
+    for (; c < (1ULL << 16); c += (1ULL << (totalCount + 1))) {
+      uint64_t target = (c ^ f) & MASK16;
+      uint64_t magic = (uint64_t)(x * ((M2 * ((c ^ M1) & MASK16) + ADDEND2) >> 16)) +
+                       (uint64_t)(z * ((M4 * ((c ^ M1) & MASK16) + ADDEND4) >> 16));
+      add_world_seed(target - (magic & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      if(CHUNK_X != 0){
+        add_world_seed(target - ((magic + x) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+      if(CHUNK_Z != 0 && CHUNK_X != CHUNK_Z){
+        add_world_seed(target - ((magic + z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+      if(CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0){
+        add_world_seed(target - ((magic + x + z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+      if(CHUNK_X != 0 && CHUNK_X != CHUNK_Z){
+        add_world_seed(target - ((magic + 2 * x) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+      if(CHUNK_Z != 0 && CHUNK_X != CHUNK_Z){
+        add_world_seed(target - ((magic + 2 * z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+      if(CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0 && CHUNK_X * 2 + CHUNK_Z != 0){
+        add_world_seed(target - ((magic + 2 * x + z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+      if(CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X != CHUNK_Z && CHUNK_X + CHUNK_Z != 0 && CHUNK_X + CHUNK_Z * 2 != 0){
+        //is the x supposed to be multiplied
+        add_world_seed(target - ((magic + x + 2 * z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+      if(CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0){
+        add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), multTrailingZeroes, firstMultInv, c, chunkSeed, seedOutputArray, seedOutputCounter);
+      }
+    }
+  }
 }
 
 constexpr int32_t count_trailing_zeros(uint64_t v){
