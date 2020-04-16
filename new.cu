@@ -289,23 +289,28 @@ void file_to_buffer(FILE *source, uint64_t *dest, size_t N){
   }
 }
 
+void buffer_to_file(uint64_t *source, FILE *dest, size_t N){
+  for(size_t i = 0; i < N; i++){
+    fprintf(dest, "%llu\n", source[i]);
+  }
+}
+
 int main(){
   FILE *in = open_file(INPUT_FILE_PATH, "r");
   FILE *out = open_file(OUTPUT_FILE_PATH, "w");
 
   const int32_t total_input_seeds = count_file_length(in);
   const int32_t input_seed_count = NUM_WORKERS;
-  auto input_cpu_buffer = std::make_unique<std::array<uint64_t, NUM_WORKERS>>();
+  uint64_t *input_cpu_buffer = (uint64_t*)malloc(sizeof(uint64_t) * input_seed_count);
 
   uint64_t *input_seeds = nullptr;
   uint64_t *output_seeds = nullptr;
   uint64_t *output_seed_count = nullptr;
 
-  CHECK_GPU_ERR(cudaMallocManaged(&input_seeds, sizeof(uint64_t) * NUM_WORKERS));
+  CHECK_GPU_ERR(cudaMallocManaged(&input_seeds, sizeof(uint64_t) * input_seed_count));
   CHECK_GPU_ERR(cudaMallocManaged(&output_seeds, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
   CHECK_GPU_ERR(cudaMallocManaged(&output_seed_count, sizeof(uint64_t)));
 
-  file_to_buffer(in, input_seeds, NUM_WORKERS);
 
   constexpr auto first_multiplier = (M2 * (uint64_t)CHUNK_X + M4 * (uint64_t)CHUNK_Z) & MASK16;
   constexpr auto mult_trailing_zeros = count_trailing_zeros(first_multiplier);
@@ -316,9 +321,11 @@ int main(){
   constexpr auto z_count = count_trailing_zeros((uint64_t)CHUNK_Z);
   constexpr auto total_count = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
+  file_to_buffer(in, input_seeds, NUM_WORKERS);
   bool flag = false;
   while(flag == false){
-    crack<<<NUM_BLOCKS, NUM_WORKERS>>>(
+
+    crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(
       input_seed_count,
       input_seeds,
       output_seed_count,
@@ -330,9 +337,21 @@ int main(){
       total_count
     );
 
+    file_to_buffer(in, input_cpu_buffer, input_seed_count);
+
+    CHECK_GPU_ERR(cudaPeekAtLastError());
+    CHECK_GPU_ERR(cudaDeviceSynchronize());
+
+    memcpy(input_cpu_buffer, input_seeds, input_seed_count);
+    buffer_to_file(output_seeds, out, *output_seed_count);
+
     flag = true;
   }
 
+  cudaFree(input_seeds);
+  cudaFree(output_seeds);
+  cudaFree(output_seed_count);
   fclose(in);
+  fflush(out);
   fclose(out);
 }
