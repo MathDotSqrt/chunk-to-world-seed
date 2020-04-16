@@ -262,6 +262,9 @@ int main() {
         }
     }
 
+    printf("init INPUT_SEED_COUNT %llu\n", WORKER_COUNT);
+
+
     printf("Beginning converting %lu seeds\n", totalInputSeeds);
     int count = 0; // Counter used for end bit
     int64_t numSearched = 0;
@@ -278,9 +281,8 @@ int main() {
     int32_t totalCount = countTrailingZeroesHost(CHUNK_X | CHUNK_Z);
     printf("FIRST %llu\n", inputSeeds[0]);
     while (true) {
-      printf("%d %llu %llu %d %llu %d %d %d\n", inputSeedCount, *inputSeeds, *outputSeedCount,
-      multTrailingZeroes, firstMultInv, xCount, zCount, totalCount);
         //runs crack with WORKER_COUNT number of seeds
+        printf("COMPUTER %llu %llu\n", inputSeedCount, *outputSeedCount);
         crack<<<(WORKER_COUNT >> 9), (1 << 9)>>>(inputSeedCount, inputSeeds,
                                             outputSeedCount, outputSeeds,
                                             multTrailingZeroes, firstMultInv,
@@ -298,6 +300,8 @@ int main() {
                 doneFlag = true;
             }
         }
+        printf("INPUT_SEED_COUNT %llu\n", inputSeedCount);
+
         CHECK_GPU_ERR(cudaPeekAtLastError());
         //waits for gpu to finish before uploading new work
         CHECK_GPU_ERR(cudaDeviceSynchronize());
@@ -342,6 +346,7 @@ int main() {
 
 
     //whyyy
+    printf("COMPUTER %llu %llu\n", inputSeedCount, *outputSeedCount);
     crack<<<(WORKER_COUNT >> 9), (1 << 9)>>>(count, inputSeeds, outputSeedCount,
                                         outputSeeds, multTrailingZeroes,
                                         firstMultInv, xCount, zCount,

@@ -101,8 +101,8 @@ constexpr uint64_t mod_inv(uint64_t x) {
 
 __device__
 int32_t ctz(uint64_t v){
-  //return __popcll((v & (-v))-1);
-  return __popcll(v ^ (v-1)) - 1;
+  return __popcll((v & (-v))-1);
+  //return __popcll(v ^ (v-1)) - 1;
 }
 
 __device__
@@ -285,23 +285,25 @@ int32_t count_file_length(FILE *file){
   return total;
 }
 
-bool file_to_buffer(FILE *source, uint64_t *dest, size_t N){
+size_t file_to_buffer(FILE *source, uint64_t *dest, size_t N){
   static char line[MAX_LINE];
   for(size_t i = 0; i < N; i++){
     if(fgets(line, MAX_LINE, source) != nullptr){
-      sscanf(line, "%llu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
+      sscanf(line, "%lu", &dest[i]);    //THIS IS SUPPOSED TO BE LLU
     }
     else{
-      return false;
+      return i;
     }
   }
-  return true;
+  return N;
 }
 
 void buffer_to_file(uint64_t *source, FILE *dest, size_t N){
   for(size_t i = 0; i < N; i++){
-    fprintf(dest, "%llu\n", source[i]);  //THIS IS SUPPOSED TO BE LLU
+    fprintf(dest, "%lu\n", source[i]);  //THIS IS SUPPOSED TO BE LLU
   }
+
+  fflush(dest);
 }
 
 int main(){
@@ -342,13 +344,14 @@ int main(){
 
   //520 0 0 0
   printf("Reading input...\n");
-  file_to_buffer(in, input_seeds_cpu, input_seed_count);
-  printf("Compute...\n");
+  uint64_t file_input_count = file_to_buffer(in, input_seeds_cpu, input_seed_count);
+  printf("init FILE_INPUT_COUNT %llu\n", file_input_count);
 
   uint64_t output_count = 0LLU;
-  CHECK_GPU_ERR(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, input_seed_count, cudaMemcpyHostToDevice));
+  CHECK_GPU_ERR(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
   bool flag = false;
-  while(true){
+  while(file_input_count == input_seed_count){
+    printf("Compute...\n");
     crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(
       input_seed_count,
       input_seeds_gpu,
@@ -361,19 +364,48 @@ int main(){
       total_count
     );
 
+    //write output cpu to file concurrently
+    printf("OUTPUT_COUNT %llu\n", output_count);
     buffer_to_file(output_seeds_cpu, out, output_count);
-    if(flag == true){
-      break;
-    }
-    flag = !file_to_buffer(in, input_seeds_cpu, input_seed_count);
+    //read input file to cpu concurrently
+    file_input_count = file_to_buffer(in, input_seeds_cpu, input_seed_count);
+    printf("FILE_INPUT_COUNT %llu\n", file_input_count);
+
 
     CHECK_GPU_ERR(cudaPeekAtLastError());
     CHECK_GPU_ERR(cudaDeviceSynchronize());
+
     output_count = *output_seed_count;
-    printf("OUTPUT_COUNT %llu\n", output_count);
-    CHECK_GPU_ERR(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, input_seed_count, cudaMemcpyHostToDevice));
-    CHECK_GPU_ERR(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count, cudaMemcpyDeviceToHost));
+    printf("OUTPUT_SEED_COUNT %llu\n", output_count);
+    CHECK_GPU_ERR(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
+    CHECK_GPU_ERR(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    *output_seed_count = 0;
   }
+
+  //writing from previous run
+  crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(
+    file_input_count,
+    input_seeds_gpu,
+    output_seed_count,
+    output_seeds_gpu,
+    mult_trailing_zeros,
+    first_mult_inv,
+    x_count,
+    z_count,
+    total_count
+  );
+  //write from previous run
+  printf("main read %llu\n", file_input_count);
+  buffer_to_file(output_seeds_cpu, out, output_count);
+  CHECK_GPU_ERR(cudaPeekAtLastError());
+  CHECK_GPU_ERR(cudaDeviceSynchronize());
+
+  output_count = *output_seed_count;
+  printf("OUTPUT_SEED_COUNT %llu\n", output_count);
+  CHECK_GPU_ERR(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+  buffer_to_file(output_seeds_cpu, out, output_count);
+
+
   printf("Done.\n");
 
   free(input_seeds_cpu);
