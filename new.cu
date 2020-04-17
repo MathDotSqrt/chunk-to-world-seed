@@ -97,17 +97,24 @@ constexpr auto FIRST_MULT_INV = (uint64_t)mod_inv(FIRST_MULT >> MULT_TRAILING_ZE
 constexpr auto X_COUNT = count_trailing_zeros((uint64_t)CHUNK_X);
 constexpr auto Z_COUNT = count_trailing_zeros((uint64_t)CHUNK_Z);
 constexpr auto TOTAL_COUNT = count_trailing_zeros(CHUNK_X | CHUNK_Z);
+
+constexpr auto C_MAX = (1ULL << 16);
+constexpr auto C_STRIDE = (1ULL << (TOTAL_COUNT + 1));
+constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 /*MAGIC NUMBERS*/
 
 
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t BLOCK_DIM_X = 64;
-constexpr int32_t BLOCK_DIM_Y = 1;
-constexpr int32_t BLOCK_DIM_Z = 1;
-constexpr int32_t GRID_DIM_X = 1024;
-constexpr int32_t GRID_DIM_Y = 1;
-constexpr int32_t GRID_DIM_Z = 1;
+constexpr int32_t SEEDS_PER_LAUNCH = 16;
+
+constexpr int32_t BLOCK_DIM_X = 1024;
+constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
+constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
+
+constexpr int32_t GRID_DIM_X = NUM_C_ITER / BLOCK_DIM_X;
+constexpr int32_t GRID_DIM_Y = SEEDS_PER_LAUNCH;
+constexpr int32_t GRID_DIM_Z = 1;   //should be 1
 
 
 constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
@@ -116,6 +123,7 @@ constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
 
 /*DETAILS*/
 constexpr int32_t MAX_LINE = 1000;
+constexpr size_t INPUT_SEED_ARRAY_SIZE = NUM_WORKERS;//SEEDS_PER_LAUNCH;
 constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_WORKERS;//1 << 20;
 /*DETAILS*/
 
@@ -202,7 +210,7 @@ void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64
   }
 
 
-  __syncthreads();
+  //__syncthreads();
 
 }
 
@@ -249,19 +257,22 @@ void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *seed_output, uint
 __global__
 void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutputArray) {
 
-  uint64_t global_id = blockIdx.x * blockDim.x + threadIdx.x;
-  if (global_id >= seedInputCount)
+  int32_t block_id = blockIdx.y * gridDim.x + blockIdx.x;
+  int32_t thread_id = block_id * blockDim.x + threadIdx.x;
+
+  //uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  if (thread_id >= seedInputCount)
     return;
 
   //clears current element to 0
-  clear_seed(seedOutputArray, global_id);
+  clear_seed(seedOutputArray, thread_id);
 
-  uint64_t chunkSeed = seedInputArray[global_id];
+  uint64_t chunkSeed = seedInputArray[thread_id];
   uint64_t start_c = X_COUNT == Z_COUNT ? chunkSeed & ((1ULL << (X_COUNT + 1)) - 1)
                                 : chunkSeed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
 
-  for (int c = start_c; c < (1ULL << 16); c += (1ULL << (TOTAL_COUNT + 1))) {
-    add_some_seeds(chunkSeed, c, seedOutputArray, global_id);
+  for (int c = start_c; c < C_MAX; c += C_STRIDE) {
+    add_some_seeds(chunkSeed, c, seedOutputArray, thread_id);
   }
 }
 
@@ -325,33 +336,29 @@ int main() {
   const int32_t total_input_seeds = count_file_length(in);
   printf("Total seeds: %d\n", total_input_seeds);
 
-  const int32_t input_seed_count = NUM_WORKERS;
-  // uint64_t *input_cpu_buffer = (uint64_t*)malloc(sizeof(uint64_t) *
-  // input_seed_count);
-
   printf("Allocating gpu mem\n");
-  uint64_t *input_seeds_cpu = (uint64_t *)malloc(sizeof(uint64_t) * input_seed_count);
+  uint64_t *input_seeds_cpu = (uint64_t *)malloc(sizeof(uint64_t) * INPUT_SEED_ARRAY_SIZE);
   uint64_t *output_seeds_cpu = (uint64_t *)calloc(OUTPUT_SEED_ARRAY_SIZE, sizeof(uint64_t));   //needs default zeros
 
   uint64_t *input_seeds_gpu = nullptr;
   uint64_t *output_seeds_gpu = nullptr;
 
-  GPU_ASSERT(cudaMalloc(&input_seeds_gpu, sizeof(uint64_t) * input_seed_count));
+  GPU_ASSERT(cudaMalloc(&input_seeds_gpu, sizeof(uint64_t) * INPUT_SEED_ARRAY_SIZE));
   GPU_ASSERT(cudaMalloc(&output_seeds_gpu, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
 
 
 
 
   printf("Reading input...\n");
-  uint64_t file_input_count = file_to_buffer(in, input_seeds_cpu, input_seed_count);
+  uint64_t file_input_count = file_to_buffer(in, input_seeds_cpu, INPUT_SEED_ARRAY_SIZE);
   GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
-  while (file_input_count == input_seed_count) {
+  while (file_input_count == INPUT_SEED_ARRAY_SIZE) {
     printf("COMPUTE...\n");
     crack<<<GRID_DIM, BLOCK_DIM>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
     // write output cpu to file concurrently
     buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
     // read input file to cpu concurrently
-    file_input_count = file_to_buffer(in, input_seeds_cpu, input_seed_count);
+    file_input_count = file_to_buffer(in, input_seeds_cpu, INPUT_SEED_ARRAY_SIZE);
 
     GPU_ASSERT(cudaPeekAtLastError());
     GPU_ASSERT(cudaDeviceSynchronize());
