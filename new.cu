@@ -106,14 +106,14 @@ constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t SEEDS_PER_LAUNCH = 32;
+constexpr int32_t SEEDS_PER_LAUNCH = 4096;
 
-constexpr int32_t BLOCK_DIM_X = 512;
+constexpr int32_t BLOCK_DIM_X = 1024;
 constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
 constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
 
 constexpr int32_t GRID_DIM_X = NUM_C_ITER / BLOCK_DIM_X;
-constexpr int32_t GRID_DIM_Y = 32;
+constexpr int32_t GRID_DIM_Y = 128;
 constexpr int32_t GRID_DIM_Z = 1;   //should be 1
 
 constexpr int32_t NUM_SUB_BATCHES = SEEDS_PER_LAUNCH / GRID_DIM_Y;
@@ -124,7 +124,7 @@ constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
 /*DETAILS*/
 constexpr int32_t MAX_LINE = 1000;
 constexpr size_t INPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH;//SEEDS_PER_LAUNCH;
-constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_WORKERS;//NUM_SUB_BATCHES * GRID_DIM_X * GRID_DIM_Y;//1 << 20;
+constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_SUB_BATCHES * GRID_DIM_X * GRID_DIM_Y;//1 << 20;
 /*DETAILS*/
 
 
@@ -258,6 +258,8 @@ void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *seed_output, uint
 
 __global__
 void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutputArray) {
+  __shared__ uint64_t buckets[NUM_SUB_BATCHES];
+
   int32_t block_id = blockIdx.y * gridDim.x + blockIdx.x;
   int32_t thread_id = block_id * blockDim.x + threadIdx.x;
 
@@ -268,8 +270,7 @@ void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutp
     //uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
 
     //clears current element to 0
-    clear_seed(seedOutputArray, thread_id);
-    __syncthreads();
+    clear_seed(seedOutputArray, output_index);
     uint64_t chunk_seed = seed_index < seedInputCount ? seedInputArray[seed_index] : INVALID_SEED;
     __syncthreads();
 
@@ -279,7 +280,7 @@ void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutp
 
     int32_t thread_x_index = threadIdx.x + blockIdx.x * blockDim.x;
     int32_t c_index = start_c + thread_x_index * C_STRIDE;
-    add_some_seeds(chunk_seed, c_index, seedOutputArray, thread_id);
+    add_some_seeds(chunk_seed, c_index, seedOutputArray, output_index);
   }
 }
 
@@ -373,8 +374,7 @@ int main() {
   while (file_input_count > 0) {
     crack<<<GRID_DIM, BLOCK_DIM>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
     auto num_seeds_found = buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
-    total_searched += file_input_count;
-    total_found += num_seeds_found;
+    auto prev_file_input_count = file_input_count;
     file_input_count = file_to_buffer(in, input_seeds_cpu, INPUT_SEED_ARRAY_SIZE);
 
     GPU_ASSERT(cudaPeekAtLastError());
@@ -385,8 +385,14 @@ int main() {
 
 
     current_time = clock::now();
+    total_searched += prev_file_input_count;
+    total_found += num_seeds_found;
+    auto delta = s_duration(current_time - prev_time).count();
+    auto seeds_per_second = prev_file_input_count / delta;
     auto uptime = s_duration(current_time - start_time).count();
-    std::cout << "Searched: " << total_searched << " Found: " << total_found << " Uptime: " << uptime << "s\n";
+    std::cout << "Searched: " << total_searched << " Found: " << total_found
+    << " Uptime: " << uptime << "s Seeds " << seeds_per_second << "seed/s \n";
+    prev_time = current_time;
   }
   buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
 
