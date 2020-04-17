@@ -119,11 +119,6 @@ constexpr const char *INPUT_FILE_PATH = "data/chunk_seeds.txt";
 constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
 /*FILE PATHS*/
 
-
-/*CUDA CONSTANTS*/
-
-/*CUDA CONSTANTS*/
-
 __host__ __device__
 int64_t next_long(uint64_t *seed) {
   *seed = (*seed * M1 + ADDEND1) & MASK48;
