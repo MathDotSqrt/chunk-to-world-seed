@@ -102,9 +102,16 @@ constexpr auto TOTAL_COUNT = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t BLOCK_SIZE = 1024;
-constexpr int32_t NUM_BLOCKS = 64;
-constexpr int32_t NUM_WORKERS = NUM_BLOCKS * BLOCK_SIZE;
+constexpr int32_t BLOCK_DIM_X = 64;
+constexpr int32_t BLOCK_DIM_Y = 1;
+constexpr int32_t BLOCK_DIM_Z = 1;
+constexpr int32_t GRID_DIM_X = 1024;
+constexpr int32_t GRID_DIM_Y = 1;
+constexpr int32_t GRID_DIM_Z = 1;
+
+
+constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
+                              * BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z;
 /*CUDA LAUNCH CONSTANTS*/
 
 /*DETAILS*/
@@ -199,6 +206,46 @@ void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64
 
 }
 
+__device__
+void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *seed_output, uint64_t index){
+  constexpr auto x = (uint64_t)CHUNK_X;
+  constexpr auto z = (uint64_t)CHUNK_Z;
+
+  const auto f = chunk_seed & MASK16;
+  const auto target = (c ^ f) & MASK16;
+  uint64_t magic = (uint64_t)(x * ((M2 * ((c ^ M1) & MASK16) + ADDEND2) >> 16)) +
+                   (uint64_t)(z * ((M4 * ((c ^ M1) & MASK16) + ADDEND4) >> 16));
+
+  add_world_seed(target - (magic & MASK16), c, chunk_seed, seed_output, index);
+  //nvcc optimizes this branching conditional statically
+  //no need for macros here
+  if (CHUNK_X != 0) {
+    add_world_seed(target - ((magic + x) & MASK16), c, chunk_seed, seed_output, index);
+  }
+  if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
+    add_world_seed(target - ((magic + z) & MASK16), c, chunk_seed, seed_output, index);
+  }
+  if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
+    add_world_seed(target - ((magic + x + z) & MASK16), c, chunk_seed, seed_output, index);
+  }
+  if (CHUNK_X != 0 && CHUNK_X != CHUNK_Z) {
+    add_world_seed(target - ((magic + 2 * x) & MASK16), c, chunk_seed, seed_output, index);
+  }
+  if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
+    add_world_seed(target - ((magic + 2 * z) & MASK16), c, chunk_seed, seed_output, index);
+  }
+  if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0 && CHUNK_X * 2 + CHUNK_Z != 0) {
+    add_world_seed(target - ((magic + 2 * x + z) & MASK16), c, chunk_seed, seed_output, index);
+  }
+  if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X != CHUNK_Z && CHUNK_X + CHUNK_Z != 0 && CHUNK_X + CHUNK_Z * 2 != 0) {
+    // is the x supposed to be multiplied
+    add_world_seed(target - ((magic + x + 2 * z) & MASK16), c, chunk_seed, seed_output, index);
+  }
+  if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
+    add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), c, chunk_seed, seed_output, index);
+  }
+}
+
 __global__
 void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutputArray) {
 
@@ -206,53 +253,15 @@ void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutp
   if (global_id >= seedInputCount)
     return;
 
+  //clears current element to 0
   clear_seed(seedOutputArray, global_id);
 
-  //clears current element to 0
-
   uint64_t chunkSeed = seedInputArray[global_id];
-  int32_t x = CHUNK_X;
-  int32_t z = CHUNK_Z;
+  uint64_t start_c = X_COUNT == Z_COUNT ? chunkSeed & ((1ULL << (X_COUNT + 1)) - 1)
+                                : chunkSeed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
 
-  //nvcc optimizes this branching conditional statically
-  //no need for macros here
-  if (CHUNK_X == 0 && CHUNK_Z == 0) {
-    add_seed_cond(true, chunkSeed, seedOutputArray, global_id);
-  } else {
-    uint64_t f = chunkSeed & MASK16;
-    uint64_t c = X_COUNT == Z_COUNT ? chunkSeed & ((1ULL << (X_COUNT + 1)) - 1)
-                                  : chunkSeed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
-    for (; c < (1ULL << 16); c += (1ULL << (TOTAL_COUNT + 1))) {
-      uint64_t target = (c ^ f) & MASK16;
-      uint64_t magic = (uint64_t)(x * ((M2 * ((c ^ M1) & MASK16) + ADDEND2) >> 16)) +
-                       (uint64_t)(z * ((M4 * ((c ^ M1) & MASK16) + ADDEND4) >> 16));
-      add_world_seed(target - (magic & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      if (CHUNK_X != 0) {
-        add_world_seed(target - ((magic + x) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-      if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
-        add_world_seed(target - ((magic + z) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-      if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
-        add_world_seed(target - ((magic + x + z) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-      if (CHUNK_X != 0 && CHUNK_X != CHUNK_Z) {
-        add_world_seed(target - ((magic + 2 * x) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-      if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
-        add_world_seed(target - ((magic + 2 * z) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-      if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0 && CHUNK_X * 2 + CHUNK_Z != 0) {
-        add_world_seed(target - ((magic + 2 * x + z) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-      if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X != CHUNK_Z && CHUNK_X + CHUNK_Z != 0 && CHUNK_X + CHUNK_Z * 2 != 0) {
-        // is the x supposed to be multiplied
-        add_world_seed(target - ((magic + x + 2 * z) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-      if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
-        add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), c, chunkSeed, seedOutputArray, global_id);
-      }
-    }
+  for (int c = start_c; c < (1ULL << 16); c += (1ULL << (TOTAL_COUNT + 1))) {
+    add_some_seeds(chunkSeed, c, seedOutputArray, global_id);
   }
 }
 
@@ -281,6 +290,7 @@ size_t file_to_buffer(FILE *source, uint64_t *dest, size_t N) {
   for (size_t i = 0; i < N; i++) {
     if (fgets(line, MAX_LINE, source) != nullptr) {
       sscanf(line, "%llu", &dest[i]); // THIS IS SUPPOSED TO BE LLU
+      //printf("seed %llu | c %llu\n", dest[i], c);
     } else {
       return i;
     }
@@ -301,6 +311,12 @@ void buffer_to_file(uint64_t *source, FILE *dest, size_t N) {
 }
 
 int main() {
+  //my implementation doesnt work for special case of CHUNK_X == CHUNK_Z == 0
+  assert(CHUNK_X != 0 && CHUNK_Z != 0);
+
+  const dim3 GRID_DIM(GRID_DIM_X, GRID_DIM_Y, GRID_DIM_Z);
+  const dim3 BLOCK_DIM(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z);
+
   setbuf(stdout, NULL);
   printf("Opening files...\n");
   FILE *in = open_file(INPUT_FILE_PATH, "r");
@@ -328,12 +344,10 @@ int main() {
 
   printf("Reading input...\n");
   uint64_t file_input_count = file_to_buffer(in, input_seeds_cpu, input_seed_count);
-
-  uint64_t output_count = 0LLU;
   GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
   while (file_input_count == input_seed_count) {
     printf("COMPUTE...\n");
-    crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
+    crack<<<GRID_DIM, BLOCK_DIM>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
     // write output cpu to file concurrently
     buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
     // read input file to cpu concurrently
@@ -341,6 +355,7 @@ int main() {
 
     GPU_ASSERT(cudaPeekAtLastError());
     GPU_ASSERT(cudaDeviceSynchronize());
+    printf("SYNC\n");
 
     //output_count = *output_seed_count;
     GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
@@ -350,14 +365,15 @@ int main() {
   printf("COMPUTE...\n");
 
   // writing from previous run
-  crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
+  crack<<<GRID_DIM, BLOCK_DIM>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
   // write from previous run
   buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
   GPU_ASSERT(cudaPeekAtLastError());
   GPU_ASSERT(cudaDeviceSynchronize());
+  printf("SYNC\n");
 
   //output_count = *output_seed_count;
-  GPU_ASSERT(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, output_count * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+  GPU_ASSERT(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, OUTPUT_SEED_ARRAY_SIZE * sizeof(uint64_t), cudaMemcpyDeviceToHost));
   buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
 
 
