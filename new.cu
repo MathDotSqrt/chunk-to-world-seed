@@ -106,7 +106,7 @@ constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t SEEDS_PER_LAUNCH = 1024;
+constexpr int32_t SEEDS_PER_LAUNCH = 32;
 
 constexpr int32_t BLOCK_DIM_X = 512;
 constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
@@ -124,7 +124,7 @@ constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
 /*DETAILS*/
 constexpr int32_t MAX_LINE = 1000;
 constexpr size_t INPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH;//SEEDS_PER_LAUNCH;
-constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_SUB_BATCHES * GRID_DIM_X * GRID_DIM_Y;//1 << 20;
+constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_WORKERS;//NUM_SUB_BATCHES * GRID_DIM_X * GRID_DIM_Y;//1 << 20;
 /*DETAILS*/
 
 
@@ -266,16 +266,18 @@ void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutp
     //uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
 
     //clears current element to 0
-    clear_seed(seedOutputArray, output_index);
+    clear_seed(seedOutputArray, thread_id);
+    __syncthreads();
+    uint64_t chunk_seed = seed_index < seedInputCount ? seedInputArray[seed_index] : INVALID_SEED;
+    __syncthreads();
 
-    uint64_t chunk_seed = seed_index < seedInputCount ? seedInputArray[seed_index] : 0;
     uint64_t start_c = X_COUNT == Z_COUNT ? chunk_seed & ((1ULL << (X_COUNT + 1)) - 1)
                                   : chunk_seed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
 
 
-    int32_t thread_y_index = threadIdx.x + blockIdx.x * blockDim.x;
-    int32_t c_index = start_c + thread_y_index * C_STRIDE;
-    add_some_seeds(chunk_seed, c_index, seedOutputArray, output_index);
+    int32_t thread_x_index = threadIdx.x + blockIdx.x * blockDim.x;
+    int32_t c_index = start_c + thread_x_index * C_STRIDE;
+    add_some_seeds(chunk_seed, c_index, seedOutputArray, thread_id);
   }
 }
 
