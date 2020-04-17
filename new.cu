@@ -160,8 +160,11 @@ void clear_seed(uint64_t *seeds, size_t index) {
 __device__
 void add_seed_cond(bool cond, uint64_t new_seed, uint64_t *seeds, size_t index) {
   // unsigned long long* cast is required for CUDA 9 :thonkgpu:
-  uint64_t prev = seeds[index];
-  seeds[index] = prev == INVALID_SEED && cond ? new_seed : prev;
+  if(cond){
+    uint64_t prev = seeds[index];
+    seeds[index] = prev == INVALID_SEED && cond ? new_seed : prev;
+  }
+  __syncthreads();
 }
 
 __host__ __device__
@@ -183,8 +186,6 @@ uint64_t get_partial_addend(uint64_t partialSeed, int32_t bits) {
 
 __device__
 void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64_t *seeds, size_t index) {
-  if (ctz(firstAddend) < MULT_TRAILING_ZEROS)
-    return;
   uint64_t bottom32BitsChunkseed = chunkSeed & MASK32;
 
   uint64_t b = (((FIRST_MULT_INV * firstAddend) >> MULT_TRAILING_ZEROS) ^ (M1 >> 16)) & make_mask(16 - MULT_TRAILING_ZEROS);
@@ -204,9 +205,10 @@ void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64
                       make_mask(16 - MULT_TRAILING_ZEROS));
 
   for (; topBits < (1ULL << 16); topBits += (1ULL << (16 - MULT_TRAILING_ZEROS))) {
+    bool condition2 = ctz(firstAddend) >= MULT_TRAILING_ZEROS;
     bool condition = get_chunk_seed((topBits << 32) + bottom32BitsSeed) == chunkSeed;
     uint64_t seed_candidate = (topBits << 32) + bottom32BitsSeed;
-    add_seed_cond(condition, seed_candidate, seeds, index);
+    add_seed_cond(condition && condition2, seed_candidate, seeds, index);
   }
 
 
