@@ -106,7 +106,7 @@ constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t SEEDS_PER_LAUNCH = 1024;
+constexpr int32_t SEEDS_PER_LAUNCH = 2048;
 constexpr int32_t WORLD_SEEDS_PER_CHUNK_SEED = 4;
 
 constexpr int32_t WARP = 32;
@@ -116,7 +116,7 @@ constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
 constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
 
 constexpr int32_t GRID_DIM_X = NUM_C_ITER / BLOCK_DIM_X;
-constexpr int32_t GRID_DIM_Y = 512;
+constexpr int32_t GRID_DIM_Y = 2048;
 constexpr int32_t GRID_DIM_Z = 1;   //should be 1
 
 constexpr int32_t NUM_SUB_BATCHES = SEEDS_PER_LAUNCH / GRID_DIM_Y;
@@ -134,7 +134,7 @@ constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_SUB_BATCHES * GRID_DIM_X * GRID_DI
 
 
 /*FILE PATHS*/
-constexpr const char *INPUT_FILE_PATH = "data/chunk_seeds.txt";
+constexpr const char *INPUT_FILE_PATH = "data/new_chunk_seeds.txt";
 constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
 /*FILE PATHS*/
 
