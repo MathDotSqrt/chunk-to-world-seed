@@ -130,7 +130,7 @@ constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_WORKERS;//NUM_SUB_BATCHES * GRID_D
 
 
 /*FILE PATHS*/
-constexpr const char *INPUT_FILE_PATH = "data/new_chunk_seeds.txt";
+constexpr const char *INPUT_FILE_PATH = "data/chunk_seeds.txt";
 constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
 /*FILE PATHS*/
 
@@ -316,8 +316,8 @@ size_t file_to_buffer(FILE *source, uint64_t *dest, size_t N) {
   return N;
 }
 
-void buffer_to_file(uint64_t *source, FILE *dest, size_t N) {
-  static int count = 0;
+int32_t buffer_to_file(uint64_t *source, FILE *dest, size_t N) {
+  int32_t count = 0;
   for (size_t i = 0; i < N; i++) {
     if(source[i] != INVALID_SEED){
       count++;
@@ -326,24 +326,32 @@ void buffer_to_file(uint64_t *source, FILE *dest, size_t N) {
   }
   //printf("COUNT %d\n", count);
   fflush(dest);
+  return count;
 }
 
 int main() {
   //my implementation doesnt work for special case of CHUNK_X == CHUNK_Z == 0
-  assert(CHUNK_X != 0 && CHUNK_Z != 0);
+  using clock=std::chrono::high_resolution_clock;
+  using s_duration=std::chrono::duration<double>;
+  using ms_duration=std::chrono::duration<double, std::milli>;
+
+
+
+  assert(CHUNK_X != 0 || CHUNK_Z != 0);
+  setbuf(stdout, NULL);
+  std::cout << "Launching...\n";
 
   const dim3 GRID_DIM(GRID_DIM_X, GRID_DIM_Y, GRID_DIM_Z);
   const dim3 BLOCK_DIM(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z);
 
-  setbuf(stdout, NULL);
-  printf("Opening files...\n");
+  std::cout << "Opening files...\n";
   FILE *in = open_file(INPUT_FILE_PATH, "r");
   FILE *out = open_file(OUTPUT_FILE_PATH, "w");
 
   const int32_t total_input_seeds = count_file_length(in);
-  printf("Total seeds: %d\n", total_input_seeds);
+  std::cout << "Total seeds: " << total_input_seeds << "\n";
 
-  printf("Allocating gpu mem\n");
+  std::cout << "Alloc mem\n";
   uint64_t *input_seeds_cpu = (uint64_t *)malloc(sizeof(uint64_t) * INPUT_SEED_ARRAY_SIZE);
   uint64_t *output_seeds_cpu = (uint64_t *)calloc(OUTPUT_SEED_ARRAY_SIZE, sizeof(uint64_t));   //needs default zeros
 
@@ -353,43 +361,37 @@ int main() {
   GPU_ASSERT(cudaMalloc(&input_seeds_gpu, sizeof(uint64_t) * INPUT_SEED_ARRAY_SIZE));
   GPU_ASSERT(cudaMalloc(&output_seeds_gpu, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
 
-
-
-
-  printf("Reading input...\n");
   uint64_t file_input_count = file_to_buffer(in, input_seeds_cpu, INPUT_SEED_ARRAY_SIZE);
   GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
-  while (file_input_count == INPUT_SEED_ARRAY_SIZE) {
-    //printf("COMPUTE...\n");
+
+  std::cout << "Launching kernel...\n";
+  auto start_time = clock::now();
+  auto prev_time = start_time;
+  auto current_time = start_time;
+  auto total_searched = 0;
+  auto total_found = 0;
+  while (file_input_count > 0) {
     crack<<<GRID_DIM, BLOCK_DIM>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
-    // write output cpu to file concurrently
-    buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
-    // read input file to cpu concurrently
+    auto num_seeds_found = buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
+    total_searched += file_input_count;
+    total_found += num_seeds_found;
     file_input_count = file_to_buffer(in, input_seeds_cpu, INPUT_SEED_ARRAY_SIZE);
 
     GPU_ASSERT(cudaPeekAtLastError());
     GPU_ASSERT(cudaDeviceSynchronize());
-    //printf("SYNC\n");
-
     //output_count = *output_seed_count;
     GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
     GPU_ASSERT(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, OUTPUT_SEED_ARRAY_SIZE * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    //*output_seed_count = 0;
+
+
+    current_time = clock::now();
+    auto uptime = s_duration(current_time - start_time).count();
+    std::cout << "Searched: " << total_searched << " Found: " << total_found << " Uptime: " << uptime << "s\n";
   }
-  printf("COMPUTE...\n");
-
-  // writing from previous run
-  crack<<<GRID_DIM, BLOCK_DIM>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
-  // write from previous run
-  buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
-  GPU_ASSERT(cudaPeekAtLastError());
-  GPU_ASSERT(cudaDeviceSynchronize());
-  printf("SYNC\n");
-
-  //output_count = *output_seed_count;
-  GPU_ASSERT(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, OUTPUT_SEED_ARRAY_SIZE * sizeof(uint64_t), cudaMemcpyDeviceToHost));
   buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
 
+  auto stop_time = clock::now();
+  std::cout << "Total execution time: " << s_duration( stop_time - start_time).count() << "s\n";
 
   free(input_seeds_cpu);
   free(output_seeds_cpu);
