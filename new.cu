@@ -106,18 +106,19 @@ constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t SEEDS_PER_LAUNCH = 2048;
-constexpr int32_t WORLD_SEEDS_PER_CHUNK_SEED = 4;
 
-constexpr int32_t WARP = 32;
+
 
 constexpr int32_t BLOCK_DIM_X = 1024;
 constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
 constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
 
-constexpr int32_t GRID_DIM_X = NUM_C_ITER / BLOCK_DIM_X;
-constexpr int32_t GRID_DIM_Y = 2048;
+constexpr int32_t GRID_DIM_X = 64;
+constexpr int32_t GRID_DIM_Y = 1;   //should be 1
 constexpr int32_t GRID_DIM_Z = 1;   //should be 1
+
+constexpr int32_t SEEDS_PER_LAUNCH = BLOCK_DIM_X * GRID_DIM_X;
+constexpr int32_t WORLD_SEEDS_PER_CHUNK_SEED = 4;
 
 constexpr int32_t NUM_SUB_BATCHES = SEEDS_PER_LAUNCH / GRID_DIM_Y;
 constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
@@ -127,8 +128,7 @@ constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
 /*DETAILS*/
 constexpr int32_t MAX_LINE = 1000;
 constexpr size_t INPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH;//SEEDS_PER_LAUNCH;
-//constexpr size_t OUTPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH * WORLD_SEEDS_PER_CHUNK_SEED;//NUM_SUB_BATCHES * GRID_DIM_X * GRID_DIM_Y;//1 << 20;
-constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_SUB_BATCHES * GRID_DIM_X * GRID_DIM_Y;//1 << 20;
+constexpr size_t OUTPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH * WORLD_SEEDS_PER_CHUNK_SEED;//1 << 20;
 /*DETAILS*/
 
 
@@ -260,10 +260,12 @@ void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket){
 __global__
 void crack(uint64_t seedInputCount, uint64_t *input_seed_array, uint64_t *output_seed_array) {
   //__shared__ uint32_t atomic_count[BLOCK_DIM_X];
-  __shared__ uint64_t buckets[NUM_SUB_BATCHES * BLOCK_DIM_X];
+  __shared__ uint32_t atomic_count[BLOCK_DIM_X];
 
   const int32_t block_id = blockIdx.y * GRID_DIM_X + blockIdx.x;
   const int32_t thread_id = block_id * BLOCK_DIM_X + threadIdx.x;
+
+
 
 
   for(int32_t y = 0; y < NUM_SUB_BATCHES; y++){
