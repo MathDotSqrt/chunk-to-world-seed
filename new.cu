@@ -92,7 +92,7 @@ constexpr uint64_t ADDEND4 = 49720483695876ULL;
 
 constexpr auto FIRST_MULT = (M2 * (uint64_t)CHUNK_X + M4 * (uint64_t)CHUNK_Z) & MASK16;
 constexpr auto MULT_TRAILING_ZEROS = count_trailing_zeros(FIRST_MULT);
-constexpr uint64_t FIRST_MULT_INV = (uint64_t)mod_inv(FIRST_MULT >> MULT_TRAILING_ZEROS);
+constexpr auto FIRST_MULT_INV = (uint64_t)mod_inv(FIRST_MULT >> MULT_TRAILING_ZEROS);
 
 constexpr auto X_COUNT = count_trailing_zeros((uint64_t)CHUNK_X);
 constexpr auto Z_COUNT = count_trailing_zeros((uint64_t)CHUNK_Z);
@@ -102,8 +102,8 @@ constexpr auto TOTAL_COUNT = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
 
 /*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t BLOCK_SIZE = 512;
-constexpr int32_t NUM_BLOCKS = 128;
+constexpr int32_t BLOCK_SIZE = 1024;
+constexpr int32_t NUM_BLOCKS = 64;
 constexpr int32_t NUM_WORKERS = NUM_BLOCKS * BLOCK_SIZE;
 /*CUDA LAUNCH CONSTANTS*/
 
@@ -115,7 +115,7 @@ constexpr size_t OUTPUT_SEED_ARRAY_SIZE = NUM_WORKERS;//1 << 20;
 
 
 /*FILE PATHS*/
-constexpr const char *INPUT_FILE_PATH = "data/chunk_seeds.txt";
+constexpr const char *INPUT_FILE_PATH = "data/new_chunk_seeds.txt";
 constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
 /*FILE PATHS*/
 
@@ -135,9 +135,6 @@ int ctz(uint64_t v) {
   // return __popcll((v & (-v))-1);
   return __popcll(v ^ (v - 1)) - 1;
 }
-
-__host__ __device__
-
 
 
 __device__
@@ -217,6 +214,8 @@ void crack(uint64_t seedInputCount, uint64_t *seedInputArray, uint64_t *seedOutp
   int32_t x = CHUNK_X;
   int32_t z = CHUNK_Z;
 
+  //nvcc optimizes this branching conditional statically
+  //no need for macros here
   if (CHUNK_X == 0 && CHUNK_Z == 0) {
     add_seed_cond(true, chunkSeed, seedOutputArray, global_id);
   } else {
@@ -303,7 +302,6 @@ void buffer_to_file(uint64_t *source, FILE *dest, size_t N) {
 
 int main() {
   setbuf(stdout, NULL);
-
   printf("Opening files...\n");
   FILE *in = open_file(INPUT_FILE_PATH, "r");
   FILE *out = open_file(OUTPUT_FILE_PATH, "w");
@@ -334,7 +332,7 @@ int main() {
   uint64_t output_count = 0LLU;
   GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
   while (file_input_count == input_seed_count) {
-
+    printf("COMPUTE...\n");
     crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
     // write output cpu to file concurrently
     buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
@@ -349,6 +347,7 @@ int main() {
     GPU_ASSERT(cudaMemcpy(output_seeds_cpu, output_seeds_gpu, OUTPUT_SEED_ARRAY_SIZE * sizeof(uint64_t), cudaMemcpyDeviceToHost));
     //*output_seed_count = 0;
   }
+  printf("COMPUTE...\n");
 
   // writing from previous run
   crack<<<NUM_BLOCKS, BLOCK_SIZE>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
