@@ -108,12 +108,12 @@ constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 /*CUDA LAUNCH CONSTANTS*/
 constexpr int32_t SEEDS_PER_LAUNCH = 1024;
 
-constexpr int32_t BLOCK_DIM_X = 128;
+constexpr int32_t BLOCK_DIM_X = 1024;
 constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
 constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
 
 constexpr int32_t GRID_DIM_X = NUM_C_ITER / BLOCK_DIM_X;
-constexpr int32_t GRID_DIM_Y = 64;
+constexpr int32_t GRID_DIM_Y = 512;
 constexpr int32_t GRID_DIM_Z = 1;   //should be 1
 
 constexpr int32_t NUM_SUB_BATCHES = SEEDS_PER_LAUNCH / GRID_DIM_Y;
