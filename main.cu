@@ -357,7 +357,7 @@ int main() {
 
     //write outputseeds to file
     for (int i = 0; i < *outputSeedCount; i++) {
-        fprintf(fp_out, "%lu\n", outputSeeds[i]);
+        fprintf(fp_out, "%llu\n", outputSeeds[i]);
     }
     fflush(fp_out);
     fclose(fp);
