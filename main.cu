@@ -192,7 +192,7 @@ __global__ void crack(uint64_t seedInputCount, uint64_t* seedInputArray, uint64_
 #endif
 
 #ifndef INPUT_FILE
-#define INPUT_FILE "SEEDS.txt"
+#define INPUT_FILE "data/new_chunk_seeds.txt"
 #endif
 
 #undef int
@@ -202,7 +202,7 @@ int main() {
         FILE *fp;
         FILE *fp_out;
         char str[MAXCHAR];
-        fp = fopen("data/chunk_seeds.txt", "r");
+        fp = fopen(INPUT_FILE, "r");
         uint64_t totalInputSeeds = 0;
         if (!fp) {
             printf("Could not open file\n");
@@ -212,7 +212,7 @@ int main() {
         while (fgets(str, MAXCHAR, fp))
             totalInputSeeds++;
         fclose(fp);
-        fp = fopen("data/chunk_seeds.txt", "r");
+        fp = fopen(INPUT_FILE, "r");
         if (!fp) {
             printf("Could not open file\n");
             return 1;
