@@ -49,11 +49,26 @@ inline void gpuAssert(cudaError_t code, const char *file, int line) {
   }
 }
 
+/*FILE PATHS*/
+constexpr const char *INPUT_FILE_PATH = "data/big_chunk_seeds.txt";
+constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
+/*FILE PATHS*/
+
 /*CHUNK CONSTANTS*/
 constexpr int32_t CHUNK_X = 3;
 constexpr int32_t CHUNK_Z = -3;
 constexpr uint64_t INVALID_SEED = 0;
 /*CHUNK CONSTANTS*/
+
+/*CUDA LAUNCH CONSTANTS*/
+constexpr int32_t BLOCK_DIM_X = 128;
+constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
+constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
+
+constexpr int32_t GRID_DIM_X = 4096;
+constexpr int32_t GRID_DIM_Y = 1;   //should be 1
+constexpr int32_t GRID_DIM_Z = 1;   //should be 1
+/*CUDA LAUNCH CONSTANTS*/
 
 /*MAGIC NUMBERS*/
 constexpr uint64_t mod_inv(uint64_t x) {
@@ -102,33 +117,13 @@ constexpr auto C_MAX = (1ULL << 16);
 constexpr auto C_STRIDE = (1ULL << (TOTAL_COUNT + 1));
 /*MAGIC NUMBERS*/
 
-
-
-/*CUDA LAUNCH CONSTANTS*/
-constexpr int32_t BLOCK_DIM_X = 128;
-constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
-constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
-
-constexpr int32_t GRID_DIM_X = 4096;
-constexpr int32_t GRID_DIM_Y = 1;   //should be 1
-constexpr int32_t GRID_DIM_Z = 1;   //should be 1
-
+/*DETAILS*/
 constexpr int32_t SEEDS_PER_LAUNCH = BLOCK_DIM_X * GRID_DIM_X;
 constexpr int32_t WORLD_SEEDS_PER_CHUNK_SEED = 8;
-/*CUDA LAUNCH CONSTANTS*/
-
-/*DETAILS*/
-constexpr int32_t MAX_LINE = 1000;
 constexpr size_t INPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH;//SEEDS_PER_LAUNCH;
 constexpr size_t OUTPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH * WORLD_SEEDS_PER_CHUNK_SEED;//1 << 20;
+constexpr int32_t MAX_LINE = 1000;
 /*DETAILS*/
-
-
-
-/*FILE PATHS*/
-constexpr const char *INPUT_FILE_PATH = "data/big_chunk_seeds.txt";
-constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
-/*FILE PATHS*/
 
 __host__ __device__
 int64_t next_long(uint64_t *seed) {
@@ -250,13 +245,13 @@ void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket, uint32_t 
 }
 
 __global__
-void crack(uint64_t seedInputCount, uint64_t *input_seed_array, uint64_t *output_seed_array) {
+void crack(uint64_t input_seed_count, uint64_t *input_seed_array, uint64_t *output_seed_array) {
   const int32_t thread_id = blockIdx.x * BLOCK_DIM_X + threadIdx.x;
 
   const int32_t input_seed_index = thread_id;
   const int32_t output_seed_index = thread_id * WORLD_SEEDS_PER_CHUNK_SEED;
 
-  if(input_seed_index >= seedInputCount){
+  if(input_seed_index >= input_seed_count){
     return;
   }
   uint64_t chunk_seed = input_seed_array[thread_id];
@@ -316,7 +311,6 @@ int32_t buffer_to_file(uint64_t *source, FILE *dest, size_t N) {
 }
 
 int main() {
-  //my implementation doesnt work for special case of CHUNK_X == CHUNK_Z == 0
   using clock=std::chrono::high_resolution_clock;
   using h_duration=std::chrono::duration<double, std::ratio<60 * 60>>;
   using m_duration=std::chrono::duration<double, std::ratio<60>>;
@@ -324,7 +318,7 @@ int main() {
   using ms_duration=std::chrono::duration<double, std::milli>;
 
 
-
+  //my implementation doesnt work for special case of CHUNK_X == CHUNK_Z == 0
   assert(CHUNK_X != 0 || CHUNK_Z != 0);
   setbuf(stdout, NULL);
   std::cout << "Init...\n";
@@ -343,6 +337,7 @@ int main() {
   uint64_t *input_seeds_gpu = nullptr;
   uint64_t *output_seeds_gpu = nullptr;
 
+  //not using managed memory because it is slow
   GPU_ASSERT(cudaMalloc(&input_seeds_gpu, sizeof(uint64_t) * INPUT_SEED_ARRAY_SIZE));
   GPU_ASSERT(cudaMalloc(&output_seeds_gpu, sizeof(uint64_t) * OUTPUT_SEED_ARRAY_SIZE));
 
