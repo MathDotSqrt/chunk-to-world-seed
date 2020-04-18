@@ -109,11 +109,11 @@ constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 
 
 
-constexpr int32_t BLOCK_DIM_X = 256;
+constexpr int32_t BLOCK_DIM_X = 128;
 constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
 constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
 
-constexpr int32_t GRID_DIM_X = 256;
+constexpr int32_t GRID_DIM_X = 2048;
 constexpr int32_t GRID_DIM_Y = 1;   //should be 1
 constexpr int32_t GRID_DIM_Z = 1;   //should be 1
 
@@ -134,7 +134,7 @@ constexpr size_t OUTPUT_SEED_ARRAY_SIZE = SEEDS_PER_LAUNCH * WORLD_SEEDS_PER_CHU
 
 
 /*FILE PATHS*/
-constexpr const char *INPUT_FILE_PATH = "data/new_chunk_seeds.txt";
+constexpr const char *INPUT_FILE_PATH = "data/big_chunk_seeds.txt";
 constexpr const char *OUTPUT_FILE_PATH = "data/WorldSeeds.txt";
 /*FILE PATHS*/
 
@@ -268,8 +268,11 @@ void crack(uint64_t seedInputCount, uint64_t *input_seed_array, uint64_t *output
   const int32_t input_seed_index = thread_id;
   const int32_t output_seed_index = thread_id * WORLD_SEEDS_PER_CHUNK_SEED;
 
+  if(input_seed_index >= seedInputCount){
+    return;
+  }
+  uint64_t chunk_seed = input_seed_array[thread_id];
   uint32_t atomic_count = 0;
-  uint64_t chunk_seed = input_seed_index < seedInputCount ? input_seed_array[thread_id] : INVALID_SEED;
 
   const uint64_t start_c = X_COUNT == Z_COUNT ? chunk_seed & ((1ULL << (X_COUNT + 1)) - 1)
                                 : chunk_seed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
