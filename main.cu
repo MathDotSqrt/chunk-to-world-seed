@@ -192,7 +192,7 @@ __global__ void crack(uint64_t seedInputCount, uint64_t* seedInputArray, uint64_
 #endif
 
 #ifndef INPUT_FILE
-#define INPUT_FILE "data/new_chunk_seeds.txt"
+#define INPUT_FILE "data/big_chunk_seeds.txt"
 #endif
 
 #undef int
