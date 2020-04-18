@@ -109,16 +109,16 @@ constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 
 
 
-constexpr int32_t BLOCK_DIM_X = 1024;
+constexpr int32_t BLOCK_DIM_X = 256;
 constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
 constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
 
-constexpr int32_t GRID_DIM_X = 64;
+constexpr int32_t GRID_DIM_X = 256;
 constexpr int32_t GRID_DIM_Y = 1;   //should be 1
 constexpr int32_t GRID_DIM_Z = 1;   //should be 1
 
 constexpr int32_t SEEDS_PER_LAUNCH = BLOCK_DIM_X * GRID_DIM_X;
-constexpr int32_t WORLD_SEEDS_PER_CHUNK_SEED = 4;
+constexpr int32_t WORLD_SEEDS_PER_CHUNK_SEED = 8;
 
 constexpr int32_t NUM_SUB_BATCHES = SEEDS_PER_LAUNCH / GRID_DIM_Y;
 constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
@@ -162,10 +162,13 @@ void clear_seed(uint64_t *bucket) {
 }
 
 __device__
-void add_seed_cond(bool cond, uint64_t new_seed, uint64_t *bucket) {
+void add_seed_cond(bool cond, uint64_t new_seed, uint64_t *bucket, uint32_t *atomic) {
   // unsigned long long* cast is required for CUDA 9 :thonkgpu:
-    uint64_t prev = *bucket;
-    *bucket = prev == INVALID_SEED && cond ? new_seed : prev;
+    if(cond){
+      bucket[*atomic] = new_seed;
+      *atomic += 1;
+    }
+
 }
 
 __host__ __device__
@@ -186,9 +189,11 @@ uint64_t get_partial_addend(uint64_t partialSeed, int32_t bits) {
 }
 
 __device__
-void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64_t *bucket) {
+void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64_t *bucket, uint32_t *atomic) {
+  if(ctz(firstAddend) < MULT_TRAILING_ZEROS){
+    return;
+  }
   uint64_t bottom32BitsChunkseed = chunkSeed & MASK32;
-
   uint64_t b = (((FIRST_MULT_INV * firstAddend) >> MULT_TRAILING_ZEROS) ^ (M1 >> 16)) & make_mask(16 - MULT_TRAILING_ZEROS);
   if (MULT_TRAILING_ZEROS != 0) {
     uint64_t smallMask = make_mask(MULT_TRAILING_ZEROS);
@@ -206,19 +211,15 @@ void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64
                       make_mask(16 - MULT_TRAILING_ZEROS));
 
   for (; topBits < (1ULL << 16); topBits += (1ULL << (16 - MULT_TRAILING_ZEROS))) {
-    bool condition2 = ctz(firstAddend) >= MULT_TRAILING_ZEROS;
     bool condition = get_chunk_seed((topBits << 32) + bottom32BitsSeed) == chunkSeed;
     uint64_t seed_candidate = (topBits << 32) + bottom32BitsSeed;
-    add_seed_cond(condition && condition2, seed_candidate, bucket);
+    add_seed_cond(condition, seed_candidate, bucket, atomic);
   }
-
-
   //__syncthreads();
-
 }
 
 __device__
-void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket){
+void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket, uint32_t *atomic){
   constexpr auto x = (uint64_t)CHUNK_X;
   constexpr auto z = (uint64_t)CHUNK_Z;
 
@@ -227,75 +228,84 @@ void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket){
   uint64_t magic = (uint64_t)(x * ((M2 * ((c ^ M1) & MASK16) + ADDEND2) >> 16)) +
                    (uint64_t)(z * ((M4 * ((c ^ M1) & MASK16) + ADDEND4) >> 16));
 
-  add_world_seed(target - (magic & MASK16), c, chunk_seed, bucket);
+  add_world_seed(target - (magic & MASK16), c, chunk_seed, bucket, atomic);
   //nvcc optimizes this branching conditional statically
   //no need for macros here
   if (CHUNK_X != 0) {
-    add_world_seed(target - ((magic + x) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + x) & MASK16), c, chunk_seed, bucket, atomic);
   }
   if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
-    add_world_seed(target - ((magic + z) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + z) & MASK16), c, chunk_seed, bucket, atomic);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
-    add_world_seed(target - ((magic + x + z) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + x + z) & MASK16), c, chunk_seed, bucket, atomic);
   }
   if (CHUNK_X != 0 && CHUNK_X != CHUNK_Z) {
-    add_world_seed(target - ((magic + 2 * x) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + 2 * x) & MASK16), c, chunk_seed, bucket, atomic);
   }
   if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
-    add_world_seed(target - ((magic + 2 * z) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + 2 * z) & MASK16), c, chunk_seed, bucket, atomic);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0 && CHUNK_X * 2 + CHUNK_Z != 0) {
-    add_world_seed(target - ((magic + 2 * x + z) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + 2 * x + z) & MASK16), c, chunk_seed, bucket, atomic);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X != CHUNK_Z && CHUNK_X + CHUNK_Z != 0 && CHUNK_X + CHUNK_Z * 2 != 0) {
     // is the x supposed to be multiplied
-    add_world_seed(target - ((magic + x + 2 * z) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + x + 2 * z) & MASK16), c, chunk_seed, bucket, atomic);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
-    add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), c, chunk_seed, bucket);
+    add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), c, chunk_seed, bucket, atomic);
   }
 }
 
 __global__
 void crack(uint64_t seedInputCount, uint64_t *input_seed_array, uint64_t *output_seed_array) {
   //__shared__ uint32_t atomic_count[BLOCK_DIM_X];
-  __shared__ uint32_t atomic_count[BLOCK_DIM_X];
 
-  const int32_t block_id = blockIdx.y * GRID_DIM_X + blockIdx.x;
-  const int32_t thread_id = block_id * BLOCK_DIM_X + threadIdx.x;
+  //const int32_t block_id = blockIdx.y * GRID_DIM_X + blockIdx.x;
+  const int32_t thread_id = blockIdx.x * BLOCK_DIM_X + threadIdx.x;
 
+  const int32_t input_seed_index = thread_id;
+  const int32_t output_seed_index = thread_id * WORLD_SEEDS_PER_CHUNK_SEED;
 
+  uint32_t atomic_count = 0;
+  uint64_t chunk_seed = input_seed_index < seedInputCount ? input_seed_array[thread_id] : INVALID_SEED;
 
-
-  for(int32_t y = 0; y < NUM_SUB_BATCHES; y++){
-    int32_t seed_index_offset = y * GRID_DIM_Y;
-    int32_t seed_index = blockIdx.y + seed_index_offset;
-    //int32_t output_index = block_id + y * gridDim.x * gridDim.y;
-    int32_t bucket_index = y * BLOCK_DIM_X + threadIdx.x;
-    //uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-
-    //clears current element to 0
-    uint64_t chunk_seed = seed_index < seedInputCount ? input_seed_array[seed_index] : INVALID_SEED;
-    clear_seed(&buckets[bucket_index]);
-
-    uint64_t start_c = X_COUNT == Z_COUNT ? chunk_seed & ((1ULL << (X_COUNT + 1)) - 1)
-                                  : chunk_seed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
-
-
-    int32_t thread_x_index = threadIdx.x + blockIdx.x * BLOCK_DIM_X;
-    int32_t c_index = start_c + thread_x_index * C_STRIDE;
-    add_some_seeds(chunk_seed, c_index, &buckets[bucket_index]);
+  const uint64_t start_c = X_COUNT == Z_COUNT ? chunk_seed & ((1ULL << (X_COUNT + 1)) - 1)
+                                : chunk_seed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
+  for(uint64_t c = start_c; c < C_MAX; c += C_STRIDE){
+    add_some_seeds(chunk_seed, c, output_seed_array + output_seed_index, &atomic_count);
   }
 
-  //atomic_count[threadIdx.x] = 0;
 
-  for(int32_t y = 0; y < NUM_SUB_BATCHES; y++){
-    int32_t output_index = y * GRID_DIM_X * GRID_DIM_Y + block_id;
-    int32_t bucket_index = y * BLOCK_DIM_X + threadIdx.x;
-    uint64_t world_seed = buckets[bucket_index];
-    atomicCAS(&output_seed_array[output_index], INVALID_SEED, world_seed);
-  }
+  // for(int32_t y = 0; y < NUM_SUB_BATCHES; y++){
+  //   int32_t seed_index_offset = y * GRID_DIM_Y;
+  //   int32_t seed_index = blockIdx.y + seed_index_offset;
+  //   //int32_t output_index = block_id + y * gridDim.x * gridDim.y;
+  //   int32_t bucket_index = y * BLOCK_DIM_X + threadIdx.x;
+  //   //uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  //
+  //   //clears current element to 0
+  //   uint64_t chunk_seed = seed_index < seedInputCount ? input_seed_array[seed_index] : INVALID_SEED;
+  //   clear_seed(&buckets[bucket_index]);
+  //
+  //   uint64_t start_c = X_COUNT == Z_COUNT ? chunk_seed & ((1ULL << (X_COUNT + 1)) - 1)
+  //                                 : chunk_seed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
+  //
+  //
+  //   int32_t thread_x_index = threadIdx.x + blockIdx.x * BLOCK_DIM_X;
+  //   int32_t c_index = start_c + thread_x_index * C_STRIDE;
+  //   add_some_seeds(chunk_seed, c_index, &buckets[bucket_index]);
+  // }
+  //
+  // //atomic_count[threadIdx.x] = 0;
+  //
+  // for(int32_t y = 0; y < NUM_SUB_BATCHES; y++){
+  //   int32_t output_index = y * GRID_DIM_X * GRID_DIM_Y + block_id;
+  //   int32_t bucket_index = y * BLOCK_DIM_X + threadIdx.x;
+  //   uint64_t world_seed = buckets[bucket_index];
+  //   atomicCAS(&output_seed_array[output_index], INVALID_SEED, world_seed);
+  // }
 }
 
 FILE *open_file(const char *path, const char *mode) {
