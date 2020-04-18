@@ -257,7 +257,6 @@ int main() {
         int32_t totalCount = countTrailingZeroes(CHUNK_X | CHUNK_Z);
 
         while (true) {
-          printf("%llu\n", inputSeeds[0]);
             crack<<<WORKER_COUNT >> 9, 1 << 9>>>(inputSeedCount, inputSeeds,
                                                 outputSeedCount, outputSeeds,
                                                 multTrailingZeroes, firstMultInv,
@@ -314,8 +313,6 @@ int main() {
                 break;
             }
         }
-        printf("%llu\n", inputSeeds[0]);
-
         crack<<<WORKER_COUNT >> 9, 1 << 9>>>(count, inputSeeds, outputSeedCount,
                                             outputSeeds, multTrailingZeroes,
                                             firstMultInv, xCount, zCount,
@@ -324,6 +321,8 @@ int main() {
         for (int i = 0; i < *outputSeedCount; i++) {
             fprintf(fp_out, "%llu\n", outputSeeds[i]);
         }
+        printf("Total time %lf\n", (double)(clock() - startTime) / CLOCKS_PER_SEC);
+
         fflush(fp_out);
         fclose(fp);
         fclose(fp_out);
