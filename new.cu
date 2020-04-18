@@ -100,29 +100,21 @@ constexpr auto TOTAL_COUNT = count_trailing_zeros(CHUNK_X | CHUNK_Z);
 
 constexpr auto C_MAX = (1ULL << 16);
 constexpr auto C_STRIDE = (1ULL << (TOTAL_COUNT + 1));
-constexpr auto NUM_C_ITER = (C_MAX / C_STRIDE);
 /*MAGIC NUMBERS*/
 
 
 
 /*CUDA LAUNCH CONSTANTS*/
-
-
-
 constexpr int32_t BLOCK_DIM_X = 128;
 constexpr int32_t BLOCK_DIM_Y = 1;  //should be 1
 constexpr int32_t BLOCK_DIM_Z = 1;  //should be 1
 
-constexpr int32_t GRID_DIM_X = 2048;
+constexpr int32_t GRID_DIM_X = 4096;
 constexpr int32_t GRID_DIM_Y = 1;   //should be 1
 constexpr int32_t GRID_DIM_Z = 1;   //should be 1
 
 constexpr int32_t SEEDS_PER_LAUNCH = BLOCK_DIM_X * GRID_DIM_X;
 constexpr int32_t WORLD_SEEDS_PER_CHUNK_SEED = 8;
-
-constexpr int32_t NUM_SUB_BATCHES = SEEDS_PER_LAUNCH / GRID_DIM_Y;
-constexpr int32_t NUM_WORKERS = GRID_DIM_X * GRID_DIM_Y * GRID_DIM_Z
-                              * BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z;
 /*CUDA LAUNCH CONSTANTS*/
 
 /*DETAILS*/
@@ -162,11 +154,10 @@ void clear_seed(uint64_t *bucket) {
 }
 
 __device__
-void add_seed_cond(bool cond, uint64_t new_seed, uint64_t *bucket, uint32_t *atomic) {
-  // unsigned long long* cast is required for CUDA 9 :thonkgpu:
+void add_seed_cond(bool cond, uint64_t new_seed, uint64_t *bucket, uint32_t *index) {
     if(cond){
-      bucket[*atomic] = new_seed;
-      *atomic += 1;
+      bucket[*index] = new_seed;
+      *index += 1;
     }
 
 }
@@ -189,7 +180,7 @@ uint64_t get_partial_addend(uint64_t partialSeed, int32_t bits) {
 }
 
 __device__
-void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64_t *bucket, uint32_t *atomic) {
+void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64_t *bucket, uint32_t *index) {
   if(ctz(firstAddend) < MULT_TRAILING_ZEROS){
     return;
   }
@@ -213,13 +204,13 @@ void add_world_seed(uint64_t firstAddend, uint64_t c, uint64_t chunkSeed, uint64
   for (; topBits < (1ULL << 16); topBits += (1ULL << (16 - MULT_TRAILING_ZEROS))) {
     bool condition = get_chunk_seed((topBits << 32) + bottom32BitsSeed) == chunkSeed;
     uint64_t seed_candidate = (topBits << 32) + bottom32BitsSeed;
-    add_seed_cond(condition, seed_candidate, bucket, atomic);
+    add_seed_cond(condition, seed_candidate, bucket, index);
   }
   //__syncthreads();
 }
 
 __device__
-void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket, uint32_t *atomic){
+void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket, uint32_t *index){
   constexpr auto x = (uint64_t)CHUNK_X;
   constexpr auto z = (uint64_t)CHUNK_Z;
 
@@ -228,41 +219,38 @@ void add_some_seeds(uint64_t chunk_seed, uint64_t c, uint64_t *bucket, uint32_t 
   uint64_t magic = (uint64_t)(x * ((M2 * ((c ^ M1) & MASK16) + ADDEND2) >> 16)) +
                    (uint64_t)(z * ((M4 * ((c ^ M1) & MASK16) + ADDEND4) >> 16));
 
-  add_world_seed(target - (magic & MASK16), c, chunk_seed, bucket, atomic);
+  add_world_seed(target - (magic & MASK16), c, chunk_seed, bucket, index);
   //nvcc optimizes this branching conditional statically
   //no need for macros here
   if (CHUNK_X != 0) {
-    add_world_seed(target - ((magic + x) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + x) & MASK16), c, chunk_seed, bucket, index);
   }
   if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
-    add_world_seed(target - ((magic + z) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + z) & MASK16), c, chunk_seed, bucket, index);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
-    add_world_seed(target - ((magic + x + z) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + x + z) & MASK16), c, chunk_seed, bucket, index);
   }
   if (CHUNK_X != 0 && CHUNK_X != CHUNK_Z) {
-    add_world_seed(target - ((magic + 2 * x) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + 2 * x) & MASK16), c, chunk_seed, bucket, index);
   }
   if (CHUNK_Z != 0 && CHUNK_X != CHUNK_Z) {
-    add_world_seed(target - ((magic + 2 * z) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + 2 * z) & MASK16), c, chunk_seed, bucket, index);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0 && CHUNK_X * 2 + CHUNK_Z != 0) {
-    add_world_seed(target - ((magic + 2 * x + z) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + 2 * x + z) & MASK16), c, chunk_seed, bucket, index);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X != CHUNK_Z && CHUNK_X + CHUNK_Z != 0 && CHUNK_X + CHUNK_Z * 2 != 0) {
     // is the x supposed to be multiplied
-    add_world_seed(target - ((magic + x + 2 * z) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + x + 2 * z) & MASK16), c, chunk_seed, bucket, index);
   }
   if (CHUNK_X != 0 && CHUNK_Z != 0 && CHUNK_X + CHUNK_Z != 0) {
-    add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), c, chunk_seed, bucket, atomic);
+    add_world_seed(target - ((magic + 2 * x + 2 * z) & MASK16), c, chunk_seed, bucket, index);
   }
 }
 
 __global__
 void crack(uint64_t seedInputCount, uint64_t *input_seed_array, uint64_t *output_seed_array) {
-  //__shared__ uint32_t atomic_count[BLOCK_DIM_X];
-
-  //const int32_t block_id = blockIdx.y * GRID_DIM_X + blockIdx.x;
   const int32_t thread_id = blockIdx.x * BLOCK_DIM_X + threadIdx.x;
 
   const int32_t input_seed_index = thread_id;
@@ -272,43 +260,13 @@ void crack(uint64_t seedInputCount, uint64_t *input_seed_array, uint64_t *output
     return;
   }
   uint64_t chunk_seed = input_seed_array[thread_id];
-  uint32_t atomic_count = 0;
+  uint32_t index_count = 0;
 
   const uint64_t start_c = X_COUNT == Z_COUNT ? chunk_seed & ((1ULL << (X_COUNT + 1)) - 1)
                                 : chunk_seed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
   for(uint64_t c = start_c; c < C_MAX; c += C_STRIDE){
-    add_some_seeds(chunk_seed, c, output_seed_array + output_seed_index, &atomic_count);
+    add_some_seeds(chunk_seed, c, output_seed_array + output_seed_index, &index_count);
   }
-
-
-  // for(int32_t y = 0; y < NUM_SUB_BATCHES; y++){
-  //   int32_t seed_index_offset = y * GRID_DIM_Y;
-  //   int32_t seed_index = blockIdx.y + seed_index_offset;
-  //   //int32_t output_index = block_id + y * gridDim.x * gridDim.y;
-  //   int32_t bucket_index = y * BLOCK_DIM_X + threadIdx.x;
-  //   //uint64_t thread_id = blockIdx.x * blockDim.x + threadIdx.x;
-  //
-  //   //clears current element to 0
-  //   uint64_t chunk_seed = seed_index < seedInputCount ? input_seed_array[seed_index] : INVALID_SEED;
-  //   clear_seed(&buckets[bucket_index]);
-  //
-  //   uint64_t start_c = X_COUNT == Z_COUNT ? chunk_seed & ((1ULL << (X_COUNT + 1)) - 1)
-  //                                 : chunk_seed & ((1ULL << (TOTAL_COUNT + 1)) - 1) ^ (1 << TOTAL_COUNT);
-  //
-  //
-  //   int32_t thread_x_index = threadIdx.x + blockIdx.x * BLOCK_DIM_X;
-  //   int32_t c_index = start_c + thread_x_index * C_STRIDE;
-  //   add_some_seeds(chunk_seed, c_index, &buckets[bucket_index]);
-  // }
-  //
-  // //atomic_count[threadIdx.x] = 0;
-  //
-  // for(int32_t y = 0; y < NUM_SUB_BATCHES; y++){
-  //   int32_t output_index = y * GRID_DIM_X * GRID_DIM_Y + block_id;
-  //   int32_t bucket_index = y * BLOCK_DIM_X + threadIdx.x;
-  //   uint64_t world_seed = buckets[bucket_index];
-  //   atomicCAS(&output_seed_array[output_index], INVALID_SEED, world_seed);
-  // }
 }
 
 FILE *open_file(const char *path, const char *mode) {
@@ -360,6 +318,8 @@ int32_t buffer_to_file(uint64_t *source, FILE *dest, size_t N) {
 int main() {
   //my implementation doesnt work for special case of CHUNK_X == CHUNK_Z == 0
   using clock=std::chrono::high_resolution_clock;
+  using h_duration=std::chrono::duration<double, std::ratio<60 * 60>>;
+  using m_duration=std::chrono::duration<double, std::ratio<60>>;
   using s_duration=std::chrono::duration<double>;
   using ms_duration=std::chrono::duration<double, std::milli>;
 
@@ -367,7 +327,7 @@ int main() {
 
   assert(CHUNK_X != 0 || CHUNK_Z != 0);
   setbuf(stdout, NULL);
-  std::cout << "Launching...\n";
+  std::cout << "Init...\n";
 
   const dim3 GRID_DIM(GRID_DIM_X, GRID_DIM_Y, GRID_DIM_Z);
   const dim3 BLOCK_DIM(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z);
@@ -377,9 +337,6 @@ int main() {
   FILE *out = open_file(OUTPUT_FILE_PATH, "w");
 
   const int32_t total_input_seeds = count_file_length(in);
-  std::cout << "Total seeds: " << total_input_seeds << "\n";
-
-  std::cout << "Alloc mem\n";
   uint64_t *input_seeds_cpu = (uint64_t *)malloc(sizeof(uint64_t) * INPUT_SEED_ARRAY_SIZE);
   uint64_t *output_seeds_cpu = (uint64_t *)calloc(OUTPUT_SEED_ARRAY_SIZE, sizeof(uint64_t));   //needs default zeros
 
@@ -392,12 +349,13 @@ int main() {
   uint64_t file_input_count = file_to_buffer(in, input_seeds_cpu, INPUT_SEED_ARRAY_SIZE);
   GPU_ASSERT(cudaMemcpy(input_seeds_gpu, input_seeds_cpu, file_input_count * sizeof(uint64_t), cudaMemcpyHostToDevice));
 
+  std::cout << "Total seeds: " << total_input_seeds << "\n";
   std::cout << "Launching kernel...\n";
   auto start_time = clock::now();
   auto prev_time = start_time;
   auto current_time = start_time;
-  auto total_searched = 0;
-  auto total_found = 0;
+  int32_t total_searched = 0;
+  int32_t total_found = 0;
   while (file_input_count > 0) {
     crack<<<GRID_DIM, BLOCK_DIM>>>(file_input_count, input_seeds_gpu, output_seeds_gpu);
     auto num_seeds_found = buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
@@ -415,16 +373,35 @@ int main() {
     current_time = clock::now();
     total_searched += prev_file_input_count;
     total_found += num_seeds_found;
-    auto delta = s_duration(current_time - prev_time).count();
-    auto seeds_per_second = prev_file_input_count / delta;
+
+
+    auto s_delta = s_duration(current_time - prev_time).count();
+    auto k_seeds_per_second = prev_file_input_count / s_delta / 1000.0;
+    auto completion = (double)total_searched / total_input_seeds * 100;
+    auto e_time = (double) (total_input_seeds - total_searched) / INPUT_SEED_ARRAY_SIZE * s_delta;
+    char suffix = 's';
+    if(e_time >= 60 * 60){
+      e_time /= 3600.0;
+      suffix = 'h';
+    }
+    else if(e_time >= 60){
+      e_time /= 60.0;
+      suffix = 'm';
+    }
+
     auto uptime = s_duration(current_time - start_time).count();
-    std::cout << "Searched: " << total_searched << " Found: " << total_found
-    << " Uptime: " << uptime << "s Seeds " << seeds_per_second << "seed/s \n";
+    //Searched Uptime
+    printf("Searched: %d seeds | Found: %d seeds | Speed: %.2lfk seeds/s | Completion: %.3lf%% | ETA: %.1lf%c | Uptime: %.1lfs\n",
+      total_searched, total_found, k_seeds_per_second, completion, e_time, suffix, uptime
+    );
+    // std::cout << "Searched: " << total_searched << " Found: " << total_found
+    // << " Uptime: " << uptime << "s Seeds " << seeds_per_second << "seed/s \n";
     prev_time = current_time;
   }
-  buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
+  total_found += buffer_to_file(output_seeds_cpu, out, OUTPUT_SEED_ARRAY_SIZE);
 
   auto stop_time = clock::now();
+  std::cout << "Total world seeds converted: " << total_found << " seeds\n";
   std::cout << "Total execution time: " << s_duration( stop_time - start_time).count() << "s\n";
 
   free(input_seeds_cpu);
